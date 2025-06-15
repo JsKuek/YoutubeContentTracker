@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Content Tracker</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📺 YouTube Content Tracker</h1>
+            <p>Keep track of your favorite YouTube channels and never miss new content!</p>
+        </div>
+
+        <div class="add-channel-section">
+            <div id="errorMessage" class="error-message" style="display: none;"></div>
+            <form class="add-channel-form" id="addChannelForm">
+                <div class="form-group">
+                    <label for="apiKey">YouTube API Key</label>
+                    <input type="password" id="apiKey" placeholder="Enter your YouTube API key" required>
+                </div>
+                <div class="form-group">
+                    <label for="channelName">Channel Name</label>
+                    <input type="text" id="channelName" placeholder="Enter channel name" required>
+                </div>
+                <div class="form-group">
+                    <label for="channelUrl">Channel URL</label>
+                    <input type="url" id="channelUrl" placeholder="https://youtube.com/@channelname" required>
+                </div>
+                <button type="submit" class="add-btn">Add Channel</button>
+            </form>
+        </div>
+
+        <div class="channels-grid" id="channelsGrid">
+            <div class="empty-state">
+                <h3>No channels added yet</h3>
+                <p>Add your first YouTube channel to get started!</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="youtube-api.js"></script>
+    <script src="youtube-tracker.js"></script>
+    <script src="main.js"></script>
+</body>
+</html>
