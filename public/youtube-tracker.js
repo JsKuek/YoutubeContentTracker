@@ -1,14 +1,28 @@
-// Main YouTube Tracker Class with localStorage support
-class YouTubeTracker {
+class SecureYouTubeTracker {
     constructor() {
-        this.youtubeAPI = null;
         this.channels = [];
         this.storageKey = 'youtube_tracker_channels';
-        this.apiKeyStorageKey = 'youtube_tracker_api_key';
+        this.apiBaseUrl = '/api/youtube'; // Backend proxy
         this.initializeEventListeners();
         this.loadChannels();
-        this.loadApiKey();
+        this.checkServerConnection();
         this.renderChannels();
+    }
+
+    async checkServerConnection() {
+        const statusDiv = document.getElementById('serverStatus');
+        try {
+            const response = await fetch('/api/youtube/health');
+            if (response.ok) {
+                statusDiv.textContent = '🟢 Server connected and ready!';
+                statusDiv.className = 'status-indicator status-connected';
+            } else {
+                throw new Error('Server not responding');
+            }
+        } catch (error) {
+            statusDiv.textContent = '🔴 Server not connected. Make sure your backend is running on port 3001.';
+            statusDiv.className = 'status-indicator status-disconnected';
+        }
     }
 
     initializeEventListeners() {
@@ -20,15 +34,13 @@ class YouTubeTracker {
     }
 
     async addChannel() {
-        const apiKeyInput = document.getElementById('apiKey');
         const nameInput = document.getElementById('channelName');
         const urlInput = document.getElementById('channelUrl');
         
-        const apiKey = apiKeyInput.value.trim();
         const name = nameInput.value.trim();
         const url = urlInput.value.trim();
 
-        if (!apiKey || !name || !url) {
+        if (!name || !url) {
             this.showError('Please fill in all fields');
             return;
         }
@@ -37,51 +49,64 @@ class YouTubeTracker {
             this.hideError();
             this.showLoading(true);
             
-            // Initialize API with the provided key
-            this.youtubeAPI = new YouTubeAPI(apiKey);
+            // Get channel ID through backend proxy
+            const channelIdResponse = await fetch(`${this.apiBaseUrl}/extract-channel-id`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url })
+            });
             
-            // // Get channel ID and info
-            // const channelId = await this.youtubeAPI.getChannelId(url);
-            // const channelInfo = await this.youtubeAPI.getChannelInfo(channelId);
-            // const videos = await this.youtubeAPI.getChannelVideos(channelId, 6);
-
-            // const channel = {
-            //     id: Date.now(),
-            //     name: channelInfo.name,
-            //     url: `https://www.youtube.com/channel/${channelId}`,
-            //     channelId: channelId,
-            //     thumbnail: channelInfo.thumbnail,
-            //     lastChecked: new Date().toISOString(),
-            //     videos: videos,
-            //     hasNewContent: this.checkForNewContent(videos),
-            //     apiKey: apiKey // Store API key for future refreshes
-            // };
-
-            // Use the new universal getContent method
-            const content = await this.youtubeAPI.getContent(url, 6);
+            if (!channelIdResponse.ok) {
+                const errorData = await channelIdResponse.json();
+                throw new Error(errorData.error || 'Failed to extract channel ID');
+            }
+            
+            const { channelId } = await channelIdResponse.json();
+            
+            // Get channel info through backend proxy
+            const channelInfoResponse = await fetch(`${this.apiBaseUrl}/channel/${channelId}`);
+            if (!channelInfoResponse.ok) {
+                const errorData = await channelInfoResponse.json();
+                throw new Error(errorData.error || 'Failed to get channel information');
+            }
+            
+            const channelData = await channelInfoResponse.json();
+            if (!channelData.items || channelData.items.length === 0) {
+                throw new Error('Channel not found');
+            }
+            
+            const channelInfo = channelData.items[0];
+            
+            // Get channel videos through backend proxy
+            const videosResponse = await fetch(`${this.apiBaseUrl}/channel/${channelId}/videos?maxResults=6`);
+            if (!videosResponse.ok) {
+                const errorData = await videosResponse.json();
+                throw new Error(errorData.error || 'Failed to get channel videos');
+            }
+            
+            const videosData = await videosResponse.json();
+            const videos = this.formatVideos(videosData.items || []);
 
             const channel = {
                 id: Date.now(),
-                name: content.info.name || content.info.title,
-                url: content.type === 'channel' ? `https://www.youtube.com/channel/${content.info.id}` : `https://www.youtube.com/playlist?list=${content.info.id}`,
-                channelId: content.info.id,
-                contentType: content.type, // Add this to track if it's channel or playlist
-                thumbnail: content.info.thumbnail,
+                name: name, // Use the user-provided name
+                url: `https://www.youtube.com/channel/${channelId}`,
+                channelId: channelId,
+                thumbnail: channelInfo.snippet.thumbnails.default.url,
                 lastChecked: new Date().toISOString(),
-                videos: content.videos,
-                hasNewContent: this.checkForNewContent(content.videos),
-                apiKey: apiKey
+                videos: videos,
+                hasNewContent: this.checkForNewContent(videos)
             };
 
             this.channels.push(channel);
             this.saveChannels();
-            this.saveApiKey(apiKey); // Save API key for convenience
             this.renderChannels();
             
             nameInput.value = '';
             urlInput.value = '';
             
         } catch (error) {
+            console.error('Error adding channel:', error);
             this.showError('Error adding channel: ' + error.message);
         } finally {
             this.showLoading(false);
@@ -93,13 +118,17 @@ class YouTubeTracker {
             const channel = this.channels.find(c => c.id === channelId);
             if (!channel) return;
 
-            // Initialize API with stored key
-            this.youtubeAPI = new YouTubeAPI(channel.apiKey);
-
             const previousVideos = channel.videos || [];
-            // const newVideos = await this.youtubeAPI.getChannelVideos(channel.channelId, 6);
-            const content = await this.youtubeAPI.getContent(channel.channelId, 6, true);
-            const newVideos = content.videos;
+            
+            // Get updated videos through backend proxy
+            const response = await fetch(`${this.apiBaseUrl}/channel/${channel.channelId}/videos?maxResults=6`);
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Failed to refresh channel');
+            }
+            
+            const data = await response.json();
+            const newVideos = this.formatVideos(data.items || []);
             
             // Check for new videos by comparing with previous videos
             const newVideoIds = newVideos.map(v => v.id);
@@ -117,6 +146,17 @@ class YouTubeTracker {
             console.error('Error refreshing channel:', error);
             this.showError('Error refreshing channel: ' + error.message);
         }
+    }
+
+    formatVideos(videoItems) {
+        return videoItems.map(item => ({
+            id: item.id.videoId,
+            title: item.snippet.title,
+            thumbnail: item.snippet.thumbnails.medium.url,
+            url: `https://www.youtube.com/watch?v=${item.id.videoId}`,
+            publishedAt: new Date(item.snippet.publishedAt),
+            duration: 'N/A' // Would need additional API call to get duration
+        }));
     }
 
     removeChannel(channelId) {
@@ -148,6 +188,7 @@ class YouTubeTracker {
                 <div class="empty-state">
                     <h3>No channels added yet</h3>
                     <p>Add your first YouTube channel to get started!</p>
+                    <p><small>✅ API keys are now handled securely server-side!</small></p>
                 </div>
             `;
             return;
@@ -156,7 +197,7 @@ class YouTubeTracker {
         grid.innerHTML = this.channels.map(channel => `
             <div class="channel-card">
                 <div class="channel-header">
-                    <h3 class="channel-name">${channel.name}</h3>
+                    <h3 class="channel-name">${this.escapeHtml(channel.name)}</h3>
                     ${channel.hasNewContent ? '<span class="new-badge">New</span>' : ''}
                 </div>
                 
@@ -165,11 +206,11 @@ class YouTubeTracker {
                     <div class="videos-grid">
                         ${channel.videos.slice(0, 6).map(video => `
                             <div class="video-thumbnail" onclick="window.open('${video.url}', '_blank')">
-                                <img src="${video.thumbnail}" alt="${video.title}" loading="lazy">
+                                <img src="${video.thumbnail}" alt="${this.escapeHtml(video.title)}" loading="lazy">
                                 <div class="video-duration">${video.duration}</div>
                                 ${this.isNewVideo(video.publishedAt) ? '<div class="new-video-indicator">New</div>' : ''}
                                 <div class="video-overlay">
-                                    <div class="video-title-thumb">${video.title}</div>
+                                    <div class="video-title-thumb">${this.escapeHtml(video.title)}</div>
                                     <div class="video-date-thumb">${this.formatDate(video.publishedAt)}</div>
                                 </div>
                             </div>
@@ -190,6 +231,15 @@ class YouTubeTracker {
                 </div>
             </div>
         `).join('');
+    }
+
+    escapeHtml(unsafe) {
+        return unsafe
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
     }
 
     isNewVideo(publishedAt) {
@@ -242,8 +292,6 @@ class YouTubeTracker {
                     }
                 });
                 console.log('Channels loaded from localStorage:', this.channels.length);
-            } else {
-                console.log('No saved channels found in localStorage');
             }
         } catch (error) {
             console.error('Error loading channels from localStorage:', error);
@@ -251,45 +299,12 @@ class YouTubeTracker {
         }
     }
 
-    saveApiKey(apiKey) {
-        try {
-            localStorage.setItem(this.apiKeyStorageKey, apiKey);
-            console.log('API key saved to localStorage');
-        } catch (error) {
-            console.error('Error saving API key to localStorage:', error);
-        }
-    }
-
-    loadApiKey() {
-        try {
-            const savedApiKey = localStorage.getItem(this.apiKeyStorageKey);
-            if (savedApiKey) {
-                const apiKeyInput = document.getElementById('apiKey');
-                if (apiKeyInput) {
-                    apiKeyInput.value = savedApiKey;
-                }
-                console.log('API key loaded from localStorage');
-            }
-        } catch (error) {
-            console.error('Error loading API key from localStorage:', error);
-        }
-    }
-
-    // Additional utility methods for localStorage management
     clearAllData() {
         if (confirm('Are you sure you want to clear all saved data? This cannot be undone.')) {
             try {
                 localStorage.removeItem(this.storageKey);
-                localStorage.removeItem(this.apiKeyStorageKey);
                 this.channels = [];
                 this.renderChannels();
-                
-                // Clear the API key input field
-                const apiKeyInput = document.getElementById('apiKey');
-                if (apiKeyInput) {
-                    apiKeyInput.value = '';
-                }
-                
                 console.log('All data cleared from localStorage');
                 alert('All data has been cleared successfully');
             } catch (error) {

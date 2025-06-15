@@ -13,6 +13,10 @@
             <p>Keep track of your favorite YouTube channels and never miss new content!</p>
         </div>
 
+        <div id="serverStatus" class="status-indicator status-disconnected">
+            🔴 Checking server connection...
+        </div>
+
         <div class="add-channel-section">
             <div id="errorMessage" class="error-message" style="display: none;"></div>
             <form class="add-channel-form" id="addChannelForm">
@@ -25,14 +29,15 @@
                     <input type="url" id="channelUrl" placeholder="https://youtube.com/@channelname" required>
                 </div>
                 <button type="submit" class="add-btn">Add Channel</button>
-                <!-- Add these buttons somewhere in your UI -->
-                 <div class="form-group">
-                    <button onclick="tracker.clearAllData()">Clear All Data</button>
-                    <button onclick="tracker.exportData()">Export Data</button>
-                    <input type="file" id="importFile" accept=".json" onchange="tracker.importData(event)" style="display: none;">
-                    <button onclick="document.getElementById('importFile').click()">Import Data</button>
-                </div>
             </form>
+
+            <div class="utility-buttons">
+                <button onclick="tracker.clearAllData()">Clear All Data</button>
+                <button onclick="tracker.exportData()">Export Data</button>
+                <input type="file" id="importFile" accept=".json" onchange="tracker.importData(event)" style="display: none;">
+                <button onclick="document.getElementById('importFile').click()">Import Data</button>
+            </div>
+            
         </div>
 
         <div class="channels-grid" id="channelsGrid">
