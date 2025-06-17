@@ -10,6 +10,11 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public')); // Serve your frontend files
 
+// Health check endpoint
+app.get('/api/youtube/health', (req, res) => {
+    res.json({ status: 'OK', message: 'YouTube API proxy is running' });
+});
+
 // YouTube API proxy endpoints
 app.get('/api/youtube/channel/:channelId', async (req, res) => {
     try {
@@ -87,7 +92,6 @@ app.post('/api/youtube/extract-channel-id', async (req, res) => {
 
 app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
-    console.log('Make sure to create a .env file with YOUTUBE_API_KEY=your_api_key');
 });
 
 // .env file (create this in your project root):
