@@ -61,38 +61,63 @@ class SecureYouTubeTracker {
                 throw new Error(errorData.error || 'Failed to extract channel ID');
             }
             
-            const { channelId } = await channelIdResponse.json();
+            const { channelId, playlistId, type } = await channelIdResponse.json();
             
-            // Get channel info through backend proxy
-            const channelInfoResponse = await fetch(`${this.apiBaseUrl}/channel/${channelId}`);
-            if (!channelInfoResponse.ok) {
-                const errorData = await channelInfoResponse.json();
-                throw new Error(errorData.error || 'Failed to get channel information');
+            let contentInfo, videos;
+            
+            if (type === 'playlist') {
+                // Get playlist info
+                const playlistResponse = await fetch(`${this.apiBaseUrl}/playlist/${playlistId}`);
+                if (!playlistResponse.ok) {
+                    const errorData = await playlistResponse.json();
+                    throw new Error(errorData.error || 'Failed to get playlist information');
+                }
+                const playlistData = await playlistResponse.json();
+                if (!playlistData.items || playlistData.items.length === 0) {
+                    throw new Error('Playlist not found');
+                }
+                contentInfo = playlistData.items[0];
+                
+                // Get playlist videos
+                const videosResponse = await fetch(`${this.apiBaseUrl}/playlist/${playlistId}/videos?maxResults=6`);
+                if (!videosResponse.ok) {
+                    const errorData = await videosResponse.json();
+                    throw new Error(errorData.error || 'Failed to get playlist videos');
+                }
+                const videosData = await videosResponse.json();
+                videos = this.formatPlaylistVideos(videosData.items || []);
+            } else {
+                // Get channel info through backend proxy
+                const channelInfoResponse = await fetch(`${this.apiBaseUrl}/channel/${channelId}`);
+                if (!channelInfoResponse.ok) {
+                    const errorData = await channelInfoResponse.json();
+                    throw new Error(errorData.error || 'Failed to get channel information');
+                }
+                
+                const channelData = await channelInfoResponse.json();
+                if (!channelData.items || channelData.items.length === 0) {
+                    throw new Error('Channel not found');
+                }
+                contentInfo = channelData.items[0];
+                
+                // Get channel videos through backend proxy
+                const videosResponse = await fetch(`${this.apiBaseUrl}/channel/${channelId}/videos?maxResults=6`);
+                if (!videosResponse.ok) {
+                    const errorData = await videosResponse.json();
+                    throw new Error(errorData.error || 'Failed to get channel videos');
+                }
+                
+                const videosData = await videosResponse.json();
+                videos = this.formatVideos(videosData.items || []);
             }
-            
-            const channelData = await channelInfoResponse.json();
-            if (!channelData.items || channelData.items.length === 0) {
-                throw new Error('Channel not found');
-            }
-            
-            const channelInfo = channelData.items[0];
-            
-            // Get channel videos through backend proxy
-            const videosResponse = await fetch(`${this.apiBaseUrl}/channel/${channelId}/videos?maxResults=6`);
-            if (!videosResponse.ok) {
-                const errorData = await videosResponse.json();
-                throw new Error(errorData.error || 'Failed to get channel videos');
-            }
-            
-            const videosData = await videosResponse.json();
-            const videos = this.formatVideos(videosData.items || []);
 
             const channel = {
                 id: Date.now(),
-                name: name, // Use the user-provided name
-                url: `https://www.youtube.com/channel/${channelId}`,
-                channelId: channelId,
-                thumbnail: channelInfo.snippet.thumbnails.default.url,
+                name: name,
+                url: type === 'playlist' ? `https://www.youtube.com/playlist?list=${playlistId}` : `https://www.youtube.com/channel/${channelId}`,
+                channelId: channelId || playlistId,
+                contentType: type || 'channel',
+                thumbnail: contentInfo.snippet.thumbnails.default?.url || contentInfo.snippet.thumbnails.high?.url,
                 lastChecked: new Date().toISOString(),
                 videos: videos,
                 hasNewContent: this.checkForNewContent(videos)
@@ -121,14 +146,20 @@ class SecureYouTubeTracker {
             const previousVideos = channel.videos || [];
             
             // Get updated videos through backend proxy
-            const response = await fetch(`${this.apiBaseUrl}/channel/${channel.channelId}/videos?maxResults=6`);
+            const endpoint = channel.contentType === 'playlist' ? 
+                `${this.apiBaseUrl}/playlist/${channel.channelId}/videos?maxResults=6` :
+                `${this.apiBaseUrl}/channel/${channel.channelId}/videos?maxResults=6`;
+
+            const response = await fetch(endpoint);
             if (!response.ok) {
                 const errorData = await response.json();
-                throw new Error(errorData.error || 'Failed to refresh channel');
+                throw new Error(errorData.error || 'Failed to refresh content');
             }
             
             const data = await response.json();
-            const newVideos = this.formatVideos(data.items || []);
+            const newVideos = channel.contentType === 'playlist' ? 
+                this.formatPlaylistVideos(data.items || []) :
+                this.formatVideos(data.items || []);
             
             // Check for new videos by comparing with previous videos
             const newVideoIds = newVideos.map(v => v.id);
@@ -144,7 +175,7 @@ class SecureYouTubeTracker {
             
         } catch (error) {
             console.error('Error refreshing channel:', error);
-            this.showError('Error refreshing channel: ' + error.message);
+            this.showError('Error refreshing content: ' + error.message);
         }
     }
 
@@ -152,10 +183,21 @@ class SecureYouTubeTracker {
         return videoItems.map(item => ({
             id: item.id.videoId,
             title: item.snippet.title,
-            thumbnail: item.snippet.thumbnails.medium.url,
+            thumbnail: item.snippet.thumbnails.medium?.url,
             url: `https://www.youtube.com/watch?v=${item.id.videoId}`,
             publishedAt: new Date(item.snippet.publishedAt),
             duration: 'N/A' // Would need additional API call to get duration
+        }));
+    }
+
+    formatPlaylistVideos(playlistItems) {
+        return playlistItems.map(item => ({
+            id: item.snippet.resourceId.videoId,
+            title: item.snippet.title,
+            thumbnail: item.snippet.thumbnails.medium?.url,
+            url: `https://www.youtube.com/watch?v=${item.snippet.resourceId.videoId}`,
+            publishedAt: new Date(item.snippet.publishedAt),
+            duration: 'N/A'
         }));
     }
 
@@ -187,7 +229,7 @@ class SecureYouTubeTracker {
             grid.innerHTML = `
                 <div class="empty-state">
                     <h3>No channels added yet</h3>
-                    <p>Add your first YouTube channel to get started!</p>
+                    <p>Add your first YouTube channel or playlist to get started!</p>
                     <p><small>✅ API keys are now handled securely server-side!</small></p>
                 </div>
             `;
@@ -198,6 +240,7 @@ class SecureYouTubeTracker {
             <div class="channel-card">
                 <div class="channel-header">
                     <h3 class="channel-name">${this.escapeHtml(channel.name)}</h3>
+                    <span class="content-type-badge">${channel.contentType === 'playlist' ? 'Playlist' : 'Channel'}</span>
                     ${channel.hasNewContent ? '<span class="new-badge">New</span>' : ''}
                 </div>
                 
@@ -223,7 +266,7 @@ class SecureYouTubeTracker {
                         Refresh
                     </button>
                     <a href="${channel.url}" target="_blank" class="btn btn-primary">
-                        Visit Channel
+                        Visit ${channel.contentType === 'playlist' ? 'Playlist' : 'Channel'}
                     </a>
                     <button class="btn btn-danger" onclick="tracker.removeChannel(${channel.id})">
                         Remove

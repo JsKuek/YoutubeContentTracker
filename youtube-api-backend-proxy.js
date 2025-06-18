@@ -57,29 +57,78 @@ app.get('/api/youtube/channel/:channelId/videos', async (req, res) => {
     }
 });
 
+// Add playlist endpoints
+app.get('/api/youtube/playlist/:playlistId', async (req, res) => {
+    try {
+        const { playlistId } = req.params;
+        const API_KEY = process.env.YOUTUBE_API_KEY;
+        
+        const response = await fetch(
+            `https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails&id=${playlistId}&key=${API_KEY}`
+        );
+        
+        const data = await response.json();
+        res.json(data);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/api/youtube/playlist/:playlistId/videos', async (req, res) => {
+    try {
+        const { playlistId } = req.params;
+        const { maxResults = 6 } = req.query;
+        const API_KEY = process.env.YOUTUBE_API_KEY;
+        
+        const response = await fetch(
+            `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${playlistId}&maxResults=${maxResults}&key=${API_KEY}`
+        );
+        
+        const data = await response.json();
+        res.json(data);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Helper endpoint to extract channel ID from URL
 app.post('/api/youtube/extract-channel-id', async (req, res) => {
     try {
         const { url } = req.body;
         const API_KEY = process.env.YOUTUBE_API_KEY;
         
+        // In extract-channel-id endpoint, add playlist detection:
+        if (url.includes('list=')) {
+            const playlistId = url.split('list=')[1].split('&')[0];
+            return res.json({ playlistId, type: 'playlist' });
+        }
+
         // Extract channel ID from various YouTube URL formats
         let channelId = null;
-        
+
         if (url.includes('/channel/')) {
             channelId = url.split('/channel/')[1].split('?')[0];
-        } else if (url.includes('/c/') || url.includes('/user/')) {
-            // For custom URLs, we need to search
-            const username = url.split('/').pop().split('?')[0];
+        } else if (url.includes('@')) {
+            // Handle @username format
+            const username = url.split('@')[1].split('?')[0];
             const response = await fetch(
-                `https://www.googleapis.com/youtube/v3/channels?part=id&forUsername=${username}&key=${API_KEY}`
+                `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&q=${encodeURIComponent(username)}&key=${API_KEY}&maxResults=1`
             );
             const data = await response.json();
             if (data.items && data.items.length > 0) {
-                channelId = data.items[0].id;
+                channelId = data.items[0].snippet.channelId;
+            }
+        } else if (url.includes('/c/') || url.includes('/user/')) {
+            const username = url.split('/').pop().split('?')[0];
+            const response = await fetch(
+                `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&q=${encodeURIComponent(username)}&key=${API_KEY}&maxResults=1`
+            );
+            const data = await response.json();
+            if (data.items && data.items.length > 0) {
+                channelId = data.items[0].snippet.channelId;
             }
         }
-        
+
         if (!channelId) {
             throw new Error('Could not extract channel ID from URL');
         }
