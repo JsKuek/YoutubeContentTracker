@@ -85,7 +85,7 @@ class SecureYouTubeTracker {
                     throw new Error(errorData.error || 'Failed to get playlist videos');
                 }
                 const videosData = await videosResponse.json();
-                videos = this.formatPlaylistVideos(videosData.items || []);
+                videos = await this.formatPlaylistVideos(videosData.items || []);
             } else {
                 // Get channel info through backend proxy
                 const channelInfoResponse = await fetch(`${this.apiBaseUrl}/channel/${channelId}`);
@@ -108,7 +108,7 @@ class SecureYouTubeTracker {
                 }
                 
                 const videosData = await videosResponse.json();
-                videos = this.formatVideos(videosData.items || []);
+                videos = await this.formatVideos(videosData.items || []);
             }
 
             const channel = {
@@ -158,8 +158,8 @@ class SecureYouTubeTracker {
             
             const data = await response.json();
             const newVideos = channel.contentType === 'playlist' ? 
-                this.formatPlaylistVideos(data.items || []) :
-                this.formatVideos(data.items || []);
+                await this.formatPlaylistVideos(data.items || []) :
+                await this.formatVideos(data.items || []);
             
             // Check for new videos by comparing with previous videos
             const newVideoIds = newVideos.map(v => v.id);
@@ -179,26 +179,52 @@ class SecureYouTubeTracker {
         }
     }
 
-    formatVideos(videoItems) {
-        return videoItems.map(item => ({
+    async formatVideos(videoItems) {
+        const videoIds = videoItems.map(item => item.id.videoId).join(',');
+        
+        // Get video details for duration
+        const detailsResponse = await fetch(`${this.apiBaseUrl}/videos/${videoIds}`);
+        const detailsData = await detailsResponse.json();
+        
+        return videoItems.map((item, index) => ({
             id: item.id.videoId,
             title: item.snippet.title,
             thumbnail: item.snippet.thumbnails.medium?.url,
             url: `https://www.youtube.com/watch?v=${item.id.videoId}`,
             publishedAt: new Date(item.snippet.publishedAt),
-            duration: 'N/A' // Would need additional API call to get duration
+            duration: this.parseDuration(detailsData.items[index]?.contentDetails?.duration || 'PT0S')
         }));
     }
-
-    formatPlaylistVideos(playlistItems) {
-        return playlistItems.map(item => ({
+    async formatPlaylistVideos(playlistItems) {
+        const videoIds = playlistItems.map(item => item.snippet.resourceId.videoId).join(',');
+        
+        // Get video details for duration
+        const detailsResponse = await fetch(`${this.apiBaseUrl}/videos/${videoIds}`);
+        const detailsData = await detailsResponse.json();
+        
+        return playlistItems.map((item, index) => ({
             id: item.snippet.resourceId.videoId,
             title: item.snippet.title,
             thumbnail: item.snippet.thumbnails.medium?.url,
             url: `https://www.youtube.com/watch?v=${item.snippet.resourceId.videoId}`,
             publishedAt: new Date(item.snippet.publishedAt),
-            duration: 'N/A'
+            duration: this.parseDuration(detailsData.items[index]?.contentDetails?.duration || 'PT0S')
         }));
+    }
+
+    // Add this duration parser method to youtube-tracker.js
+    parseDuration(duration) {
+        const match = duration.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
+        if (!match) return '0:00';
+        
+        const hours = (match[1] || '').replace('H', '');
+        const minutes = (match[2] || '').replace('M', '');
+        const seconds = (match[3] || '').replace('S', '');
+        
+        if (hours) {
+            return `${hours}:${minutes.padStart(2, '0')}:${seconds.padStart(2, '0')}`;
+        }
+        return `${minutes || '0'}:${seconds.padStart(2, '0')}`;
     }
 
     removeChannel(channelId) {

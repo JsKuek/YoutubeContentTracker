@@ -169,6 +169,23 @@ app.post('/api/youtube/extract-channel-id', async (req, res) => {
     }
 });
 
+// Endpoint to get video details by video IDs (video duration)
+app.get('/api/youtube/videos/:videoIds', async (req, res) => {
+    try {
+        const { videoIds } = req.params;
+        const API_KEY = process.env.YOUTUBE_API_KEY;
+        
+        const response = await fetch(
+            `https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${videoIds}&key=${API_KEY}`
+        );
+        
+        const data = await response.json();
+        res.json(data);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
 });
