@@ -37,6 +37,22 @@ app.get('/api/youtube/channel/:channelId', async (req, res) => {
 });
 
 app.get('/api/youtube/channel/:channelId/videos', async (req, res) => {
+    
+    // Helper function to filter out shorts
+    function isShort(duration) {
+        if (!duration) return false;
+        
+        const match = duration.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
+        if (!match) return false;
+        
+        const hours = parseInt((match[1] || '').replace('H', '')) || 0;
+        const minutes = parseInt((match[2] || '').replace('M', '')) || 0;
+        const seconds = parseInt((match[3] || '').replace('S', '')) || 0;
+        
+        const totalSeconds = hours * 3600 + minutes * 60 + seconds;
+        return totalSeconds <= 60; // Consider videos 60 seconds or less as shorts
+    }
+
     try {
         const { channelId } = req.params;
         const { maxResults = 6 } = req.query;
@@ -46,11 +62,25 @@ app.get('/api/youtube/channel/:channelId/videos', async (req, res) => {
             `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&maxResults=${maxResults}&order=date&type=video&key=${API_KEY}`
         );
         
-        if (!response.ok) {
-            throw new Error(`YouTube API error: ${response.status}`);
+        const data = await response.json();
+        
+        // Filter out shorts (videos under 60 seconds) by getting video details
+        if (data.items && data.items.length > 0) {
+            const videoIds = data.items.map(item => item.id.videoId).join(',');
+            const detailsResponse = await fetch(
+                `https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${videoIds}&key=${API_KEY}`
+            );
+            const detailsData = await detailsResponse.json();
+            
+            // Filter videos longer than 60 seconds
+            const filteredItems = data.items.filter((item, index) => {
+                const duration = detailsData.items[index]?.contentDetails?.duration;
+                return !isShort(duration);
+            }).slice(0, maxResults);
+            
+            data.items = filteredItems;
         }
         
-        const data = await response.json();
         res.json(data);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -134,6 +164,23 @@ app.post('/api/youtube/extract-channel-id', async (req, res) => {
         }
         
         res.json({ channelId });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Endpoint to get video details by video IDs (video duration)
+app.get('/api/youtube/videos/:videoIds', async (req, res) => {
+    try {
+        const { videoIds } = req.params;
+        const API_KEY = process.env.YOUTUBE_API_KEY;
+        
+        const response = await fetch(
+            `https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${videoIds}&key=${API_KEY}`
+        );
+        
+        const data = await response.json();
+        res.json(data);
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
