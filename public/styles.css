@@ -42,6 +42,10 @@ body::before {
     font-size: 2.5rem;
     margin-bottom: 10px;
     text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    background: linear-gradient(135deg, #fff 0%, #e0e8ff 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
 }
 
 .header p {
@@ -49,21 +53,45 @@ body::before {
     opacity: 0.9;
 }
 
+.status-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 20px;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.status-connected {
+    background: rgba(80, 200, 120, 0.2);
+    color: #50C878;
+}
+
+.status-disconnected {
+    background: rgba(231, 76, 60, 0.2);
+    color: #E74C3C;
+}
+
 .add-channel-section {
     background: rgba(255, 255, 255, 0.08);
     backdrop-filter: blur(20px);
-    border-radius: 16px;
-    padding: 28px;
+    border-radius: 20px;
+    padding: 32px;
     margin-bottom: 32px;
     border: 1px solid rgba(255, 255, 255, 0.15);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
 }
 
 .add-channel-form {
     display: flex;
-    gap: 15px;
+    gap: 16px;
     flex-wrap: wrap;
     align-items: end;
+    margin-bottom: 24px;
 }
 
 .form-group {
@@ -74,18 +102,19 @@ body::before {
 .form-group label {
     display: block;
     color: white;
-    margin-bottom: 5px;
+    margin-bottom: 6px;
     font-weight: 600;
+    font-size: 0.95rem;
 }
 
 .form-group input {
     width: 100%;
-    padding: 14px 16px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 10px;
+    padding: 16px 18px;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 12px;
     background: rgba(255, 255, 255, 0.95);
     font-size: 15px;
-    transition: all 0.3s ease;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     backdrop-filter: blur(10px);
 }
 
@@ -93,27 +122,44 @@ body::before {
     outline: none;
     background: rgba(255, 255, 255, 0.98);
     border-color: #4A90E2;
-    transform: translateY(-1px);
-    box-shadow: 0 4px 20px rgba(74, 144, 226, 0.2);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(74, 144, 226, 0.25);
 }
 
 .add-btn {
-    padding: 14px 28px;
+    padding: 16px 32px;
     background: linear-gradient(135deg, #4A90E2 0%, #357ABD 100%);
     color: white;
     border: none;
-    border-radius: 10px;
+    border-radius: 12px;
     font-size: 15px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.3s ease;
-    min-width: 130px;
-    box-shadow: 0 4px 15px rgba(74, 144, 226, 0.3);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    min-width: 140px;
+    box-shadow: 0 6px 20px rgba(74, 144, 226, 0.3);
+    position: relative;
+    overflow: hidden;
+}
+
+.add-btn::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+    transition: left 0.5s;
+}
+
+.add-btn:hover::before {
+    left: 100%;
 }
 
 .add-btn:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 25px rgba(74, 144, 226, 0.4);
+    transform: translateY(-3px);
+    box-shadow: 0 12px 35px rgba(74, 144, 226, 0.4);
     background: linear-gradient(135deg, #5A9FE7 0%, #4084C7 100%);
 }
 
@@ -122,20 +168,106 @@ body::before {
     cursor: not-allowed;
 }
 
+/* Enhanced Utility Buttons Section */
+.utility-buttons {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: center;
+    padding: 20px 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.utility-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 20px;
+    border: none;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    text-decoration: none;
+    backdrop-filter: blur(15px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    position: relative;
+    overflow: hidden;
+    min-width: 120px;
+    justify-content: center;
+}
+
+.utility-btn::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+    transition: left 0.6s;
+}
+
+.utility-btn:hover::before {
+    left: 100%;
+}
+
+.utility-btn-clear {
+    background: rgba(231, 76, 60, 0.15);
+    color: #ff6b6b;
+    box-shadow: 0 4px 15px rgba(231, 76, 60, 0.2);
+}
+
+.utility-btn-clear:hover {
+    background: rgba(231, 76, 60, 0.25);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(231, 76, 60, 0.3);
+    color: #ff5252;
+}
+
+.utility-btn-export {
+    background: rgba(80, 200, 120, 0.15);
+    color: #4ade80;
+    box-shadow: 0 4px 15px rgba(80, 200, 120, 0.2);
+}
+
+.utility-btn-export:hover {
+    background: rgba(80, 200, 120, 0.25);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(80, 200, 120, 0.3);
+    color: #22c55e;
+}
+
+.utility-btn-import {
+    background: rgba(168, 85, 247, 0.15);
+    color: #a855f7;
+    box-shadow: 0 4px 15px rgba(168, 85, 247, 0.2);
+}
+
+.utility-btn-import:hover {
+    background: rgba(168, 85, 247, 0.25);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(168, 85, 247, 0.3);
+    color: #9333ea;
+}
+
+/* Icons will be handled in HTML for better control */
+
 .channels-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
-    gap: 25px;
+    grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+    gap: 28px;
 }
 
 .channel-card {
     background: rgba(255, 255, 255, 0.95);
     backdrop-filter: blur(20px);
-    border-radius: 16px;
-    padding: 24px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
-    transition: all 0.4s ease;
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 20px;
+    padding: 28px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    border: 1px solid rgba(255, 255, 255, 0.25);
     position: relative;
     overflow: hidden;
 }
@@ -146,13 +278,20 @@ body::before {
     top: 0;
     left: 0;
     right: 0;
-    height: 3px;
-    background: linear-gradient(90deg, #4A90E2, #50C878, #4A90E2);
+    height: 4px;
+    background: linear-gradient(90deg, #4A90E2, #50C878, #a855f7, #4A90E2);
+    background-size: 200% 100%;
+    animation: gradientShift 3s ease-in-out infinite;
+}
+
+@keyframes gradientShift {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
 }
 
 .channel-card:hover {
-    transform: translateY(-8px);
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.25);
+    transform: translateY(-10px);
+    box-shadow: 0 25px 50px rgba(0, 0, 0, 0.25);
     background: rgba(255, 255, 255, 0.98);
 }
 
@@ -160,71 +299,75 @@ body::before {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 20px;
+    margin-bottom: 24px;
 }
 
 .channel-name {
-    font-size: 1.25rem;
+    font-size: 1.3rem;
     font-weight: 700;
     color: #2C3E50;
     margin: 0;
+    background: linear-gradient(135deg, #2C3E50 0%, #4A90E2 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
 }
 
 .new-badge {
     background: linear-gradient(135deg, #50C878 0%, #32CD32 100%);
     color: white;
-    padding: 6px 14px;
-    border-radius: 20px;
+    padding: 8px 16px;
+    border-radius: 25px;
     font-size: 0.75rem;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.5px;
     animation: pulse 2s infinite;
-    box-shadow: 0 2px 10px rgba(80, 200, 120, 0.3);
+    box-shadow: 0 4px 15px rgba(80, 200, 120, 0.4);
 }
 
 @keyframes pulse {
-    0% { transform: scale(1); }
-    50% { transform: scale(1.05); }
-    100% { transform: scale(1); }
+    0% { transform: scale(1); box-shadow: 0 4px 15px rgba(80, 200, 120, 0.4); }
+    50% { transform: scale(1.05); box-shadow: 0 6px 20px rgba(80, 200, 120, 0.6); }
+    100% { transform: scale(1); box-shadow: 0 4px 15px rgba(80, 200, 120, 0.4); }
 }
 
 .channel-info {
-    margin-bottom: 20px;
+    margin-bottom: 24px;
 }
 
 .videos-section {
-    margin-bottom: 20px;
+    margin-bottom: 24px;
 }
 
 .videos-title {
     color: #2C3E50;
-    font-size: 0.95rem;
+    font-size: 1rem;
     font-weight: 600;
-    margin-bottom: 12px;
+    margin-bottom: 16px;
 }
 
 .videos-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-    gap: 12px;
-    margin-bottom: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 14px;
+    margin-bottom: 20px;
 }
 
 .video-thumbnail {
     position: relative;
-    border-radius: 8px;
+    border-radius: 12px;
     overflow: hidden;
     background: #f8f9fa;
     aspect-ratio: 16/9;
     cursor: pointer;
-    transition: all 0.3s ease;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 .video-thumbnail:hover {
-    transform: scale(1.05);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    transform: scale(1.08);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
 }
 
 .video-thumbnail img {
@@ -238,16 +381,16 @@ body::before {
     bottom: 0;
     left: 0;
     right: 0;
-    background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.85));
     color: white;
-    padding: 8px 6px 4px;
-    font-size: 0.7rem;
-    line-height: 1.2;
+    padding: 10px 8px 6px;
+    font-size: 0.75rem;
+    line-height: 1.3;
 }
 
 .video-title-thumb {
     font-weight: 600;
-    margin-bottom: 2px;
+    margin-bottom: 3px;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
@@ -255,31 +398,32 @@ body::before {
 }
 
 .video-date-thumb {
-    font-size: 0.65rem;
+    font-size: 0.7rem;
     opacity: 0.9;
 }
 
 .video-duration {
     position: absolute;
-    top: 6px;
-    right: 6px;
+    top: 8px;
+    right: 8px;
     background: rgba(0, 0, 0, 0.8);
     color: white;
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-size: 0.7rem;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 0.75rem;
     font-weight: 600;
+    backdrop-filter: blur(10px);
 }
 
 .new-video-indicator {
     position: absolute;
-    top: 6px;
-    left: 6px;
+    top: 8px;
+    left: 8px;
     background: linear-gradient(135deg, #50C878 0%, #32CD32 100%);
     color: white;
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-size: 0.65rem;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 0.7rem;
     font-weight: 700;
     text-transform: uppercase;
     animation: pulse 2s infinite;
@@ -287,101 +431,135 @@ body::before {
 
 .last-video {
     color: #7F8C8D;
-    font-size: 0.9rem;
-    margin-bottom: 8px;
+    font-size: 0.95rem;
+    margin-bottom: 10px;
     font-weight: 500;
 }
 
 .video-title {
     color: #2C3E50;
     font-weight: 600;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
     line-height: 1.4;
-    font-size: 0.95rem;
+    font-size: 1rem;
 }
 
 .video-date {
     color: #95A5A6;
-    font-size: 0.85rem;
+    font-size: 0.9rem;
     font-weight: 500;
 }
 
 .channel-actions {
     display: flex;
-    gap: 10px;
+    gap: 12px;
     flex-wrap: wrap;
 }
 
 .btn {
-    padding: 11px 20px;
+    padding: 12px 24px;
     border: none;
-    border-radius: 10px;
+    border-radius: 12px;
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     text-decoration: none;
     display: inline-block;
     text-align: center;
+    position: relative;
+    overflow: hidden;
+}
+
+.btn::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+    transition: left 0.5s;
+}
+
+.btn:hover::before {
+    left: 100%;
 }
 
 .btn-primary {
     background: linear-gradient(135deg, #4A90E2 0%, #357ABD 100%);
     color: white;
-    box-shadow: 0 4px 12px rgba(74, 144, 226, 0.25);
+    box-shadow: 0 6px 20px rgba(74, 144, 226, 0.3);
 }
 
 .btn-primary:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(74, 144, 226, 0.35);
+    transform: translateY(-3px);
+    box-shadow: 0 10px 30px rgba(74, 144, 226, 0.4);
     background: linear-gradient(135deg, #5A9FE7 0%, #4084C7 100%);
 }
 
 .btn-danger {
     background: linear-gradient(135deg, #E74C3C 0%, #C0392B 100%);
     color: white;
-    box-shadow: 0 4px 12px rgba(231, 76, 60, 0.25);
+    box-shadow: 0 6px 20px rgba(231, 76, 60, 0.3);
 }
 
 .btn-danger:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(231, 76, 60, 0.35);
+    transform: translateY(-3px);
+    box-shadow: 0 10px 30px rgba(231, 76, 60, 0.4);
     background: linear-gradient(135deg, #EC5D4E 0%, #CB4335 100%);
 }
 
 .empty-state {
     text-align: center;
     color: white;
-    padding: 60px 20px;
+    padding: 80px 20px;
 }
 
 .empty-state h3 {
-    font-size: 1.5rem;
-    margin-bottom: 10px;
+    font-size: 1.8rem;
+    margin-bottom: 12px;
     opacity: 0.9;
+    background: linear-gradient(135deg, #fff 0%, #e0e8ff 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
 }
 
 .empty-state p {
     opacity: 0.7;
+    font-size: 1.1rem;
 }
 
 .error-message {
     background: linear-gradient(135deg, #E74C3C 0%, #C0392B 100%);
     color: white;
-    padding: 12px 20px;
-    border-radius: 10px;
-    margin-bottom: 20px;
+    padding: 16px 24px;
+    border-radius: 12px;
+    margin-bottom: 24px;
     text-align: center;
     font-weight: 600;
+    box-shadow: 0 6px 20px rgba(231, 76, 60, 0.3);
 }
 
 @media (max-width: 768px) {
     .add-channel-form {
         flex-direction: column;
+        margin-bottom: 20px;
     }
     
     .form-group {
         min-width: 100%;
+    }
+    
+    .utility-buttons {
+        flex-direction: column;
+        align-items: center;
+    }
+    
+    .utility-btn {
+        width: 100%;
+        max-width: 250px;
     }
     
     .channels-grid {
@@ -390,5 +568,14 @@ body::before {
     
     .header h1 {
         font-size: 2rem;
+    }
+    
+    .add-channel-section {
+        padding: 24px;
+    }
+    
+    .videos-grid {
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: 10px;
     }
 }

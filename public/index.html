@@ -32,10 +32,16 @@
             </form>
 
             <div class="utility-buttons">
-                <button onclick="tracker.clearAllData()">Clear All Data</button>
-                <button onclick="tracker.exportData()">Export Data</button>
+                <button class="utility-btn utility-btn-clear" onclick="tracker.clearAllData()">
+                    🗑️ Clear All Channels
+                </button>
+                <button class="utility-btn utility-btn-export" onclick="tracker.exportData()">
+                    💾 Backup Channels
+                </button>
                 <input type="file" id="importFile" accept=".json" onchange="tracker.importData(event)" style="display: none;">
-                <button onclick="document.getElementById('importFile').click()">Import Data</button>
+                <button class="utility-btn utility-btn-import" onclick="document.getElementById('importFile').click()">
+                    📂 Load Channels
+                </button>
             </div>
             
         </div>
