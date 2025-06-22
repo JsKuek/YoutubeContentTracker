@@ -138,8 +138,13 @@ class SecureYouTubeTracker {
         }
     }
 
-    async refreshChannel(channelId) {
+    async refreshChannel(channelId, buttonElement = null) {
         try {
+            // Set button to loading state
+            if (buttonElement) {
+                ButtonStateManager.setLoading(buttonElement, '🔄 Refreshing...');
+            }
+
             const channel = this.channels.find(c => c.id === channelId);
             if (!channel) return;
 
@@ -172,10 +177,18 @@ class SecureYouTubeTracker {
             
             this.saveChannels();
             this.renderChannels();
+
+            // Show success state
+            if (buttonElement) {
+                ButtonStateManager.setSuccess(buttonElement, '✅ Updated!');
+            }
             
         } catch (error) {
             console.error('Error refreshing channel:', error);
             this.showError('Error refreshing content: ' + error.message);
+            if (buttonElement) {
+                ButtonStateManager.setError(buttonElement, '❌ Failed');
+            }
         }
     }
 
@@ -288,7 +301,7 @@ class SecureYouTubeTracker {
                 </div>
 
                 <div class="channel-actions">
-                    <button class="btn btn-primary" onclick="tracker.refreshChannel(${channel.id})">
+                    <button class="btn btn-primary" onclick="tracker.refreshChannel(${channel.id}, this)">
                         Refresh
                     </button>
                     <a href="${channel.url}" target="_blank" class="btn btn-primary">
@@ -446,3 +459,55 @@ class SecureYouTubeTracker {
         reader.readAsText(file);
     }
 }
+
+// Button state management utility
+const ButtonStateManager = {
+    setLoading: function(button, loadingText = 'Loading...') {
+        if (!button) return;
+        
+        // Store original content
+        button.dataset.originalText = button.innerHTML;
+        button.dataset.originalDisabled = button.disabled;
+        
+        // Set loading state
+        button.classList.add('loading');
+        button.disabled = true;
+        button.innerHTML = loadingText;
+    },
+    
+    setSuccess: function(button, successText = 'Success!', duration = 2000) {
+        if (!button) return;
+        
+        button.classList.remove('loading');
+        button.classList.add('success');
+        button.innerHTML = successText;
+        
+        setTimeout(() => {
+            this.reset(button);
+        }, duration);
+    },
+    
+    setError: function(button, errorText = 'Error!', duration = 3000) {
+        if (!button) return;
+        
+        button.classList.remove('loading');
+        button.classList.add('error');
+        button.innerHTML = errorText;
+        
+        setTimeout(() => {
+            this.reset(button);
+        }, duration);
+    },
+    
+    reset: function(button) {
+        if (!button) return;
+        
+        button.classList.remove('loading', 'success', 'error');
+        button.innerHTML = button.dataset.originalText || button.innerHTML;
+        button.disabled = button.dataset.originalDisabled === 'true';
+        
+        // Clean up
+        delete button.dataset.originalText;
+        delete button.dataset.originalDisabled;
+    }
+};
