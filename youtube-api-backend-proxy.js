@@ -36,35 +36,36 @@ app.get('/api/youtube/channel/:channelId', async (req, res) => {
     }
 });
 
-app.get('/api/youtube/channel/:channelId/videos', async (req, res) => {
+// Helper function to filter out shorts
+function isShort(duration) {
+    if (!duration) return false;
     
-    // Helper function to filter out shorts
-    function isShort(duration) {
-        if (!duration) return false;
-        
-        const match = duration.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
-        if (!match) return false;
-        
-        const hours = parseInt((match[1] || '').replace('H', '')) || 0;
-        const minutes = parseInt((match[2] || '').replace('M', '')) || 0;
-        const seconds = parseInt((match[3] || '').replace('S', '')) || 0;
-        
-        const totalSeconds = hours * 3600 + minutes * 60 + seconds;
-        return totalSeconds <= 60; // Consider videos 60 seconds or less as shorts
-    }
+    const match = duration.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
+    if (!match) return false;
+    
+    const hours = parseInt((match[1] || '').replace('H', '')) || 0;
+    const minutes = parseInt((match[2] || '').replace('M', '')) || 0;
+    const seconds = parseInt((match[3] || '').replace('S', '')) || 0;
+    
+    const totalSeconds = hours * 3600 + minutes * 60 + seconds;
+    return totalSeconds <= 60; // Consider videos 60 seconds or less as shorts
+}
 
+app.get('/api/youtube/channel/:channelId/videos', async (req, res) => {
     try {
         const { channelId } = req.params;
         const { maxResults = 6 } = req.query;
         const API_KEY = process.env.YOUTUBE_API_KEY;
         
+        // Request more videos initially to account for filtering
+        const requestCount = parseInt(maxResults) * 4 ; // Request maxResults*4 videos by default, may adjust based on my needs
+        
         const response = await fetch(
-            `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&maxResults=${maxResults}&order=date&type=video&key=${API_KEY}`
+            `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&maxResults=${requestCount}&order=date&type=video&key=${API_KEY}`
         );
         
         const data = await response.json();
         
-        // Filter out shorts (videos under 60 seconds) by getting video details
         if (data.items && data.items.length > 0) {
             const videoIds = data.items.map(item => item.id.videoId).join(',');
             const detailsResponse = await fetch(
@@ -72,11 +73,19 @@ app.get('/api/youtube/channel/:channelId/videos', async (req, res) => {
             );
             const detailsData = await detailsResponse.json();
             
-            // Filter videos longer than 60 seconds
-            const filteredItems = data.items.filter((item, index) => {
-                const duration = detailsData.items[index]?.contentDetails?.duration;
-                return !isShort(duration);
-            }).slice(0, maxResults);
+            // Create a map for easier lookup
+            const detailsMap = {};
+            detailsData.items.forEach(item => {
+                detailsMap[item.id] = item;
+            });
+            
+            // Filter and limit results
+            const filteredItems = data.items
+                .filter(item => {
+                    const details = detailsMap[item.id.videoId];
+                    return details && !isShort(details.contentDetails.duration);
+                })
+                .slice(0, parseInt(maxResults));
             
             data.items = filteredItems;
         }
