@@ -49,6 +49,33 @@ function isShort(duration) {
     
     const totalSeconds = hours * 3600 + minutes * 60 + seconds;
     return totalSeconds <= 60; // Consider videos 60 seconds or less as shorts
+
+const { exec } = require('child_process');
+
+// Accepts a video ID and returns resolution & aspect ratio
+function getVideoFormat(videoId) {
+    return new Promise((resolve, reject) => {
+        const command = `yt-dlp -j https://www.youtube.com/watch?v=${videoId}`;
+        exec(command, { maxBuffer: 1024 * 1024 }, (error, stdout) => {
+            if (error) return reject(error);
+            try {
+                const metadata = JSON.parse(stdout);
+                const { width, height } = metadata;
+                const aspectRatio = width && height ? (width / height).toFixed(2) : null;
+                resolve({ videoId, width, height, aspectRatio });
+                // resolve({ width, height, aspectRatio });
+            } catch (e) {
+                reject(e);
+            }
+        });
+    });
+}
+
+function isProbablyShortVideo({ width, height, aspectRatio }) {
+    return (
+        width && height &&
+        aspectRatio && parseFloat(aspectRatio) < 0.8 // Tall portrait format
+    );
 }
 
 app.get('/api/youtube/channel/:channelId/videos', async (req, res) => {
