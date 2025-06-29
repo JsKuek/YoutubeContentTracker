@@ -78,6 +78,51 @@ function isProbablyShortVideo({ width, height, aspectRatio }) {
     );
 }
 
+// Accept list of video IDs for metadata fetch (title, duration, etc.)
+app.post('/api/youtube/videos/metadata', async (req, res) => {
+    try {
+        const { videoIds } = req.body;
+        const API_KEY = process.env.YOUTUBE_API_KEY;
+
+        if (!videoIds || !Array.isArray(videoIds)) {
+            return res.status(400).json({ error: 'videoIds must be an array' });
+        }
+
+        // Step 1: Fetch metadata from YouTube API
+        const chunks = [];
+        for (let i = 0; i < videoIds.length; i += 50) {
+            const chunk = videoIds.slice(i, i + 50);
+            const idsParam = chunk.join(',');
+            const response = await fetch(
+                `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${idsParam}&key=${API_KEY}`
+            );
+            const data = await response.json();
+            chunks.push(...(data.items || []));
+        }
+
+        // Step 2: Extract video IDs for yt-dlp
+        const ytDlpChecks = await Promise.allSettled(
+            chunks.map(item => getVideoFormat(item.id))
+        );
+
+        // Step 3: Filter by aspect ratio
+        const allowedVideoIds = ytDlpChecks
+            .filter(result => result.status === 'fulfilled')
+            .map(result => result.value)
+            .filter(format => !isProbablyShortVideo(format))
+            .map(format => format.videoId);
+
+        // Step 4: Filter original chunk list to keep only non-Shorts
+        const filteredChunks = chunks.filter(item =>
+            allowedVideoIds.includes(item.id)
+        );
+
+        res.json({ items: filteredChunks });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 app.get('/api/youtube/channel/:channelId/videos', async (req, res) => {
     try {
         const { channelId } = req.params;
