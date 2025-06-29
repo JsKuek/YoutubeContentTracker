@@ -170,24 +170,49 @@ class SecureYouTubeTracker {
             if (!channel) return;
 
             const previousVideos = channel.videos || [];
-            
-            // Get updated videos through backend proxy
-            const endpoint = channel.contentType === 'playlist' ? 
-                `${this.apiBaseUrl}/playlist/${channel.channelId}/videos?maxResults=6` :
-                `${this.apiBaseUrl}/channel/${channel.channelId}/videos?maxResults=6`;
+            let newVideos;
 
-            const response = await fetch(endpoint);
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || 'Failed to refresh content');
+            if (channel.contentType === 'playlist') {
+                const response = await fetch(`${this.apiBaseUrl}/playlist/${channel.channelId}/videos?maxResults=6`);
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || 'Failed to refresh playlist');
+                }
+
+                const data = await response.json();
+                newVideos = await this.formatPlaylistVideos(data.items || []);
+            } else {
+                // Step 1: Fetch raw videos
+                const videosResponse = await fetch(`${this.apiBaseUrl}/channel/${channel.channelId}/videos?maxResults=12`);
+                if (!videosResponse.ok) {
+                    const errorData = await videosResponse.json();
+                    throw new Error(errorData.error || 'Failed to get channel videos during refresh');
+                }
+
+                const videosData = await videosResponse.json();
+                const rawItems = videosData.items || [];
+
+                const videoIds = rawItems
+                    .map(item => item.id?.videoId || item.id)
+                    .filter(Boolean);
+
+                // Step 2: Call /videos/metadata to get filtered list
+                const metadataResponse = await fetch(`${this.apiBaseUrl}/videos/metadata`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ videoIds: videoItems.map(item => item.id.videoId) })
+                });
+
+                if (!metadataResponse.ok) {
+                    const errorData = await metadataResponse.json();
+                    throw new Error(errorData.error || 'Failed to fetch filtered video metadata during refresh');
+                }
+
+                const metadataData = await metadataResponse.json();
+                newVideos = await this.formatVideos(metadataData.items || []);
             }
-            
-            const data = await response.json();
-            const newVideos = channel.contentType === 'playlist' ? 
-                await this.formatPlaylistVideos(data.items || []) :
-                await this.formatVideos(data.items || []);
-            
-            // Check for new videos by comparing with previous videos
+
+            // Update channel object
             const newVideoIds = newVideos.map(v => v.id);
             const previousVideoIds = previousVideos.map(v => v.id);
             const hasNewVideos = newVideoIds.some(id => !previousVideoIds.includes(id));
@@ -229,6 +254,7 @@ class SecureYouTubeTracker {
             duration: this.parseDuration(detailsData.items[index]?.contentDetails?.duration || 'PT0S')
         }));
     }
+
     async formatPlaylistVideos(playlistItems) {
         const videoIds = playlistItems.map(item => item.snippet.resourceId.videoId).join(',');
         
