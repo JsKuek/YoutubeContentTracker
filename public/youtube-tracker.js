@@ -240,9 +240,10 @@ class SecureYouTubeTracker {
 
     async formatVideos(videoItems) {
         const videoIds = videoItems.map(item => item.id.videoId).join(',');
-        
+        const encodedIds = encodeURIComponent(videoIds); // Encode to handle special characters ','
+
         // Get video details for duration
-        const detailsResponse = await fetch(`${this.apiBaseUrl}/videos/${videoIds}`);
+        const detailsResponse = await fetch(`${this.apiBaseUrl}/videos/${encodedIds}`);
         const detailsData = await detailsResponse.json();
         
         return videoItems.map((item, index) => ({
