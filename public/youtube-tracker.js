@@ -88,6 +88,8 @@ class SecureYouTubeTracker {
                 videos = await this.formatPlaylistVideos(videosData.items || []);
             } else {
                 // Get channel info through backend proxy
+
+                // Step 1: Get channel info
                 const channelInfoResponse = await fetch(`${this.apiBaseUrl}/channel/${channelId}`);
                 if (!channelInfoResponse.ok) {
                     const errorData = await channelInfoResponse.json();
@@ -99,8 +101,8 @@ class SecureYouTubeTracker {
                     throw new Error('Channel not found');
                 }
                 contentInfo = channelData.items[0];
-                
-                // Get channel videos through backend proxy
+
+                // Step 2: Fetch videos via /channel/:id/videos (unfiltered)
                 const videosResponse = await fetch(`${this.apiBaseUrl}/channel/${channelId}/videos?maxResults=6`);
                 if (!videosResponse.ok) {
                     const errorData = await videosResponse.json();
@@ -108,7 +110,26 @@ class SecureYouTubeTracker {
                 }
                 
                 const videosData = await videosResponse.json();
-                videos = await this.formatVideos(videosData.items || []);
+                const rawItems = videosData.items || [];
+
+                const videoIds = rawItems
+                    .map(item => item.id?.videoId || item.id) // Covers both snippet.id and item.id shapes
+                    .filter(Boolean);
+
+                // Step 3: POST video IDs to /videos/metadata for yt-dlp filtering
+                const metadataResponse = await fetch(`${this.apiBaseUrl}/videos/metadata`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ videoIds }),
+                });
+
+                if (!metadataResponse.ok) {
+                    const errorData = await metadataResponse.json();
+                    throw new Error(errorData.error || 'Failed to get filtered video metadata');
+                }
+
+                const metadataData = await metadataResponse.json();
+                videos = await this.formatVideos(metadataData.items || []);
             }
 
             const channel = {
