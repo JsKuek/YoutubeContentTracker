@@ -37,18 +37,19 @@ app.get('/api/youtube/channel/:channelId', async (req, res) => {
 });
 
 // Helper function to filter out shorts
-function isShort(duration) {
-    if (!duration) return false;
+// function isShort(duration) {
+//     if (!duration) return false;
     
-    const match = duration.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
-    if (!match) return false;
+//     const match = duration.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
+//     if (!match) return false;
     
-    const hours = parseInt((match[1] || '').replace('H', '')) || 0;
-    const minutes = parseInt((match[2] || '').replace('M', '')) || 0;
-    const seconds = parseInt((match[3] || '').replace('S', '')) || 0;
+//     const hours = parseInt((match[1] || '').replace('H', '')) || 0;
+//     const minutes = parseInt((match[2] || '').replace('M', '')) || 0;
+//     const seconds = parseInt((match[3] || '').replace('S', '')) || 0;
     
-    const totalSeconds = hours * 3600 + minutes * 60 + seconds;
-    return totalSeconds <= 60; // Consider videos 60 seconds or less as shorts
+//     const totalSeconds = hours * 3600 + minutes * 60 + seconds;
+//     return totalSeconds <= 60; // Consider videos 60 seconds or less as shorts
+// }
 
 const { exec } = require('child_process');
 
@@ -155,7 +156,7 @@ app.get('/api/youtube/channel/:channelId/videos', async (req, res) => {
             const filteredItems = data.items
                 .filter(item => {
                     const details = detailsMap[item.id.videoId];
-                    return details && !isShort(details.contentDetails.duration);
+                    return details;
                 })
                 .slice(0, parseInt(maxResults));
             
