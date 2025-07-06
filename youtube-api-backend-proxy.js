@@ -56,7 +56,7 @@ const { exec } = require('child_process');
 // Accepts a video ID and returns resolution & aspect ratio
 function getVideoFormat(videoId) {
     return new Promise((resolve, reject) => {
-        const command = `yt-dlp -j https://www.youtube.com/watch?v=${videoId}`;
+        const command = `yt-dlp -j --no-warnings --skip-download https://www.youtube.com/watch?v=${videoId}`;
         
         console.log(`🔍 [Backend] Running yt-dlp for video: ${videoId}`);
         
