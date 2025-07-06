@@ -57,26 +57,50 @@ const { exec } = require('child_process');
 function getVideoFormat(videoId) {
     return new Promise((resolve, reject) => {
         const command = `yt-dlp -j https://www.youtube.com/watch?v=${videoId}`;
-        exec(command, { maxBuffer: 1024 * 1024 }, (error, stdout) => {
-            if (error) return reject(error);
+        
+        console.log(`🔍 [Backend] Running yt-dlp for video: ${videoId}`);
+        
+        exec(command, { 
+            maxBuffer: 1024 * 1024,
+            timeout: 30000 // 30 second timeout
+        }, (error, stdout, stderr) => {
+            if (error) {
+                console.error(`❌ [Backend] yt-dlp error for ${videoId}:`, error.message);
+                return reject(new Error(`yt-dlp failed for ${videoId}: ${error.message}`));
+            }
+            
+            if (stderr) {
+                console.warn(`⚠️ [Backend] yt-dlp stderr for ${videoId}:`, stderr);
+            }
+            
             try {
                 const metadata = JSON.parse(stdout);
                 const { width, height } = metadata;
                 const aspectRatio = width && height ? (width / height).toFixed(2) : null;
+                
+                console.log(`📐 [Backend] Video ${videoId}: ${width}x${height} (ratio: ${aspectRatio})`);
+                
                 resolve({ videoId, width, height, aspectRatio });
-                // resolve({ width, height, aspectRatio });
-            } catch (e) {
-                reject(e);
+            } catch (parseError) {
+                console.error(`❌ [Backend] JSON parse error for ${videoId}:`, parseError.message);
+                reject(new Error(`Failed to parse yt-dlp output for ${videoId}: ${parseError.message}`));
             }
         });
     });
 }
 
 function isProbablyShortVideo({ width, height, aspectRatio }) {
-    return (
-        width && height &&
-        aspectRatio && parseFloat(aspectRatio) < 0.8 // Tall portrait format
-    );
+    if (!width || !height || !aspectRatio) {
+        console.log('⚠️ [Backend] Missing dimensions, assuming not a short');
+        return false; // If we can't determine, assume it's not a short
+    }
+    
+    const ratio = parseFloat(aspectRatio);
+    const isShort = ratio < 0.8; // Tall portrait format
+    
+    console.log(`📱 [Backend] Aspect ratio ${ratio} - ${isShort ? 'SHORT' : 'REGULAR'}`);
+    
+    return isShort;
 }
 
 // Accept list of video IDs for metadata fetch (title, duration, etc.)
@@ -124,10 +148,10 @@ app.post('/api/youtube/videos/metadata', async (req, res) => {
         // Step 2: Extract video IDs for yt-dlp (skip this for now to isolate the issue)
         // Let's first return all videos without yt-dlp filtering
         console.log('🎬 [Backend] Returning all videos without filtering');
-        res.json({ items: chunks });
+        // res.json({ items: chunks });
 
         // Comment out the yt-dlp filtering temporarily:
-        /*
+        /**/
         const ytDlpChecks = await Promise.allSettled(
             chunks.map(item => getVideoFormat(item.id))
         );
@@ -136,10 +160,21 @@ app.post('/api/youtube/videos/metadata', async (req, res) => {
         console.log('✅ [Backend] Successful checks:', ytDlpChecks.filter(r => r.status === 'fulfilled').length);
         console.log('❌ [Backend] Failed checks:', ytDlpChecks.filter(r => r.status === 'rejected').length);
 
+        // Log failed checks for debugging
+        const failedChecks = ytDlpChecks.filter(r => r.status === 'rejected');
+        if (failedChecks.length > 0) {
+            console.log('🚨 [Backend] Failed yt-dlp checks:', failedChecks.map(f => f.reason?.message || f.reason));
+        }
+
+        // Step 3: Filter out shorts based on aspect ratio
         const allowedVideoIds = ytDlpChecks
             .filter(result => result.status === 'fulfilled')
             .map(result => result.value)
-            .filter(format => !isProbablyShortVideo(format))
+            .filter(format => {
+                const isShort = isProbablyShortVideo(format);
+                console.log(`📱 [Backend] Video ${format.videoId}: ${format.width}x${format.height} (${format.aspectRatio}) - ${isShort ? 'SHORT' : 'REGULAR'}`);
+                return !isShort;
+            })
             .map(format => format.videoId);
 
         console.log('🎯 [Backend] Videos after filtering shorts:', allowedVideoIds.length);
@@ -149,8 +184,10 @@ app.post('/api/youtube/videos/metadata', async (req, res) => {
         );
 
         console.log('📋 [Backend] Final filtered chunks:', filteredChunks.length);
+
+        // Send the final response (only one response per request)
         res.json({ items: filteredChunks });
-        */
+        /**/
         
     } catch (error) {
         console.error('❌ [Backend] Error in /videos/metadata:', error);
