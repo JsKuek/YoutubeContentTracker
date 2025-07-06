@@ -85,8 +85,15 @@ app.post('/api/youtube/videos/metadata', async (req, res) => {
         const { videoIds } = req.body;
         const API_KEY = process.env.YOUTUBE_API_KEY;
 
+        console.log('🔍 [Backend] Received video IDs:', videoIds);
+
         if (!videoIds || !Array.isArray(videoIds)) {
             return res.status(400).json({ error: 'videoIds must be an array' });
+        }
+
+        if (videoIds.length === 0) {
+            console.log('⚠️ [Backend] Empty video IDs array');
+            return res.json({ items: [] });
         }
 
         // Step 1: Fetch metadata from YouTube API
@@ -94,32 +101,59 @@ app.post('/api/youtube/videos/metadata', async (req, res) => {
         for (let i = 0; i < videoIds.length; i += 50) {
             const chunk = videoIds.slice(i, i + 50);
             const idsParam = chunk.join(',');
+            
+            console.log(`📡 [Backend] Fetching chunk ${Math.floor(i/50) + 1}: ${chunk.length} videos`);
+            
             const response = await fetch(
                 `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${idsParam}&key=${API_KEY}`
             );
+            
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('❌ [Backend] YouTube API error:', response.status, errorText);
+                throw new Error(`YouTube API error: ${response.status} - ${errorText}`);
+            }
+            
             const data = await response.json();
+            console.log(`📊 [Backend] Chunk ${Math.floor(i/50) + 1} returned:`, data.items?.length || 0, 'items');
             chunks.push(...(data.items || []));
         }
 
-        // Step 2: Extract video IDs for yt-dlp
+        console.log('📋 [Backend] Total metadata items fetched:', chunks.length);
+
+        // Step 2: Extract video IDs for yt-dlp (skip this for now to isolate the issue)
+        // Let's first return all videos without yt-dlp filtering
+        console.log('🎬 [Backend] Returning all videos without filtering');
+        res.json({ items: chunks });
+
+        // Comment out the yt-dlp filtering temporarily:
+        /*
         const ytDlpChecks = await Promise.allSettled(
             chunks.map(item => getVideoFormat(item.id))
         );
 
-        // Step 3: Filter by aspect ratio
+        console.log('🔍 [Backend] yt-dlp checks completed:', ytDlpChecks.length);
+        console.log('✅ [Backend] Successful checks:', ytDlpChecks.filter(r => r.status === 'fulfilled').length);
+        console.log('❌ [Backend] Failed checks:', ytDlpChecks.filter(r => r.status === 'rejected').length);
+
         const allowedVideoIds = ytDlpChecks
             .filter(result => result.status === 'fulfilled')
             .map(result => result.value)
             .filter(format => !isProbablyShortVideo(format))
             .map(format => format.videoId);
 
-        // Step 4: Filter original chunk list to keep only non-Shorts
+        console.log('🎯 [Backend] Videos after filtering shorts:', allowedVideoIds.length);
+
         const filteredChunks = chunks.filter(item =>
             allowedVideoIds.includes(item.id)
         );
 
+        console.log('📋 [Backend] Final filtered chunks:', filteredChunks.length);
         res.json({ items: filteredChunks });
+        */
+        
     } catch (error) {
+        console.error('❌ [Backend] Error in /videos/metadata:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -130,41 +164,27 @@ app.get('/api/youtube/channel/:channelId/videos', async (req, res) => {
         const { maxResults = 6 } = req.query;
         const API_KEY = process.env.YOUTUBE_API_KEY;
         
+        console.log('Fetching videos for channel:', channelId); // Debug log
+
         // Request more videos initially to account for filtering
         const requestCount = parseInt(maxResults) * 4 ; // Request maxResults*4 videos by default, may adjust based on my needs
         
         const response = await fetch(
             `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&maxResults=${requestCount}&order=date&type=video&key=${API_KEY}`
         );
-        
-        const data = await response.json();
-        
-        if (data.items && data.items.length > 0) {
-            const videoIds = data.items.map(item => item.id.videoId).join(',');
-            const detailsResponse = await fetch(
-                `https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${videoIds}&key=${API_KEY}`
-            );
-            const detailsData = await detailsResponse.json();
-            
-            // Create a map for easier lookup
-            const detailsMap = {};
-            detailsData.items.forEach(item => {
-                detailsMap[item.id] = item;
-            });
-            
-            // Filter and limit results
-            const filteredItems = data.items
-                .filter(item => {
-                    const details = detailsMap[item.id.videoId];
-                    return details;
-                })
-                .slice(0, parseInt(maxResults));
-            
-            data.items = filteredItems;
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('YouTube API error:', response.status, errorText);
+            throw new Error(`YouTube API error: ${response.status} - ${errorText}`);
         }
         
+        const data = await response.json();
+        console.log('Search API returned:', data.items?.length || 0, 'items'); // Debug log
+        
+        // Return the raw search results - don't filter here
         res.json(data);
     } catch (error) {
+        console.error('Error in /channel/:channelId/videos:', error);
         res.status(500).json({ error: error.message });
     }
 });
