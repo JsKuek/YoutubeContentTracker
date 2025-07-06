@@ -103,20 +103,41 @@ class SecureYouTubeTracker {
                 contentInfo = channelData.items[0];
 
                 // Step 2: Fetch videos via /channel/:id/videos (unfiltered)
+                console.log('🔍 Fetching videos for channelId:', channelId);
                 const videosResponse = await fetch(`${this.apiBaseUrl}/channel/${channelId}/videos?maxResults=6`);
                 if (!videosResponse.ok) {
                     const errorData = await videosResponse.json();
                     throw new Error(errorData.error || 'Failed to get channel videos');
                 }
-                
+
+                // all videos
                 const videosData = await videosResponse.json();
+                console.log('📺 Raw videos data:', videosData);
+
                 const rawItems = videosData.items || [];
+                console.log('🎬 Raw items count:', rawItems.length);
+
+                if (rawItems.length > 0) {
+                    console.log('📝 First raw item structure:', rawItems[0]);
+                }
 
                 const videoIds = rawItems
-                    .map(item => item.id?.videoId || item.id) // Covers both snippet.id and item.id shapes
+                    .map(item => {
+                        const videoId = item.id?.videoId || item.id;
+                        console.log('🆔 Extracted video ID:', videoId, 'from item:', item.id);
+                        return videoId;
+                    })
                     .filter(Boolean);
 
+                console.log('🎯 Final video IDs:', videoIds);
+
+                if (!videoIds.length) {
+                    throw new Error('No video IDs to fetch metadata for.');
+                }
+                console.log('Fetching metadata for videoIds:', videoIds); // Debug log
+
                 // Step 3: POST video IDs to /videos/metadata for yt-dlp filtering
+                console.log('📡 Fetching metadata for videoIds:', videoIds);
                 const metadataResponse = await fetch(`${this.apiBaseUrl}/videos/metadata`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -129,7 +150,15 @@ class SecureYouTubeTracker {
                 }
 
                 const metadataData = await metadataResponse.json();
+                console.log('🔬 Metadata response:', metadataData);
+                console.log('📊 Metadata items count:', metadataData.items?.length || 0);
+
+                if (metadataData.items && metadataData.items.length > 0) {
+                    console.log('📋 First metadata item:', metadataData.items[0]);
+                }
+
                 videos = await this.formatVideos(metadataData.items || []);
+                console.log('🎥 Final formatted videos:', videos);
             }
 
             const channel = {
@@ -209,6 +238,7 @@ class SecureYouTubeTracker {
                 }
 
                 const metadataData = await metadataResponse.json();
+                console.log('metadataData.items sample:', metadataData.items?.[0]);
                 newVideos = await this.formatVideos(metadataData.items || []);
             }
 
@@ -239,22 +269,30 @@ class SecureYouTubeTracker {
     }
 
     async formatVideos(videoItems) {
-        const videoIds = videoItems.map(item => item.id.videoId).join(',');
-        const encodedIds = encodeURIComponent(videoIds); // Encode to handle special characters ','
-
-        // Get video details for duration
-        const detailsResponse = await fetch(`${this.apiBaseUrl}/videos/${encodedIds}`);
-        const detailsData = await detailsResponse.json();
-        
-        return videoItems.map((item, index) => ({
-            id: item.id.videoId,
-            title: item.snippet.title,
-            thumbnail: item.snippet.thumbnails.medium?.url,
-            url: `https://www.youtube.com/watch?v=${item.id.videoId}`,
-            publishedAt: new Date(item.snippet.publishedAt),
-            duration: this.parseDuration(detailsData.items[index]?.contentDetails?.duration || 'PT0S')
-        }));
+    console.log('🎬 formatVideos called with:', videoItems?.length || 0, 'items');
+    
+    if (!videoItems || videoItems.length === 0) {
+        console.log('⚠️ No video items to format');
+        return [];
     }
+    
+    console.log('📝 First video item structure:', videoItems[0]);
+    
+    return videoItems.map((item, index) => {
+        console.log(`🎯 Processing video ${index + 1}:`, item.id);
+        
+        return {
+            id: item.id,
+            title: item.snippet?.title || 'No Title',
+            thumbnail: item.snippet?.thumbnails?.medium?.url || item.snippet?.thumbnails?.default?.url,
+            url: `https://www.youtube.com/watch?v=${item.id}`,
+            publishedAt: new Date(item.snippet?.publishedAt || Date.now()),
+            duration: this.parseDuration(item.contentDetails?.duration || 'PT0S')
+        };
+    });
+}
+
+
 
     async formatPlaylistVideos(playlistItems) {
         const videoIds = playlistItems.map(item => item.snippet.resourceId.videoId).join(',');
