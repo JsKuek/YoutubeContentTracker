@@ -229,7 +229,7 @@ class SecureYouTubeTracker {
                 const metadataResponse = await fetch(`${this.apiBaseUrl}/videos/metadata`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ videoIds: videoItems.map(item => item.id.videoId) })
+                    body: JSON.stringify({ videoIds })
                 });
 
                 if (!metadataResponse.ok) {
