@@ -112,6 +112,32 @@ function isProbablyShortVideo({ width, height, aspectRatio }) {
     return isShort;
 }
 
+// Heuristic check for shorts based on duration and title
+// This is a simple heuristic and may not be 100% accurate
+function isHeuristicallyShort(video) {
+    try {
+        const durationISO = video.contentDetails?.duration || '';
+        const title = video.snippet?.title?.toLowerCase() || '';
+
+        // Parse duration (e.g., PT59S, PT1M12S)
+        const durationMatch = durationISO.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
+        if (!durationMatch) return false;
+
+        const hours = parseInt(durationMatch[1]) || 0;
+        const minutes = parseInt(durationMatch[2]) || 0;
+        const seconds = parseInt(durationMatch[3]) || 0;
+        const totalSeconds = hours * 3600 + minutes * 60 + seconds;
+
+        const isShortByTime = totalSeconds <= 120; // 2 minutes in seconds
+        const isShortByTitle = title.includes('#shorts') || title.includes('#short');
+
+        return isShortByTime || isShortByTitle;
+    } catch (e) {
+        console.warn('⚠️ Heuristic check failed:', e.message);
+        return false;
+    }
+}
+
 // Accept list of video IDs for metadata fetch (title, duration, etc.)
 app.post('/api/youtube/videos/metadata', async (req, res) => {
     try {
@@ -154,31 +180,47 @@ app.post('/api/youtube/videos/metadata', async (req, res) => {
 
         console.log('📋 [Backend] Total metadata items fetched:', chunks.length);
 
-        // Step 2: Extract video IDs for yt-dlp (skip this for now to isolate the issue)
+        // Step 2: Process metadata to filter shorts and run yt-dlp checks
 
+        // Heuristic check for shorts
+        const shortHeuristics = [];
+        const needsYtDlp = [];
+
+        for (const item of chunks) {
+            if (isHeuristicallyShort(item)) {
+                shortHeuristics.push(item.id); // List of video IDs that are heuristically identified as shorts
+            } else {
+                needsYtDlp.push(item.id);
+            }
+        }
+        console.log(`🔍 Heuristic SHORTS: ${shortHeuristics.length}, Need yt-dlp: ${needsYtDlp.length}`);
+        console.log(`🔧 Throttling yt-dlp to ${MAX_CONCURRENT_YTDLP} concurrent processes`);
+        console.log(`🎯 Total videos going through yt-dlp:`, needsYtDlp.length);
+
+        // If no videos need yt-dlp, return all videos
         const ytDlpChecks = await Promise.allSettled(
             needsYtDlp.map(videoID => limit(() => getVideoFormat(videoID)))
         );
         console.log('🔍 [Backend] yt-dlp checks completed:', ytDlpChecks.length);
         console.log('✅ [Backend] Successful checks:', ytDlpChecks.filter(r => r.status === 'fulfilled').length);
         console.log('❌ [Backend] Failed checks:', ytDlpChecks.filter(r => r.status === 'rejected').length);
-
         // Log failed checks for debugging
         const failedChecks = ytDlpChecks.filter(r => r.status === 'rejected');
         if (failedChecks.length > 0) {
             console.log('🚨 [Backend] Failed yt-dlp checks:', failedChecks.map(f => f.reason?.message || f.reason));
         }
 
-        // Step 3: Filter out shorts based on aspect ratio
-        const allowedVideoIds = ytDlpChecks
-            .filter(result => result.status === 'fulfilled')
-            .map(result => result.value)
-            .filter(format => {
-                const isShort = isProbablyShortVideo(format);
-                console.log(`📱 [Backend] Video ${format.videoId}: ${format.width}x${format.height} (${format.aspectRatio}) - ${isShort ? 'SHORT' : 'REGULAR'}`);
-                return !isShort;
-            })
-            .map(format => format.videoId);
+        // List of video IDs that passed yt-dlp checks and are not shorts
+        const filteredVideoIds = ytDlpChecks
+        .filter(result => result.status === 'fulfilled')
+        .map(result => result.value)
+        .filter(format => !isProbablyShortVideo(format))
+        .map(format => format.videoId);
+        
+        // Step 3: Filter chunks based on yt-dlp results and heuristics
+        const allowedVideoIds = chunks
+            .map(item => item.id)
+            .filter(id => !shortHeuristics.includes(id) && filteredVideoIds.includes(id));
 
         console.log('🎯 [Backend] Videos after filtering shorts:', allowedVideoIds.length);
 
