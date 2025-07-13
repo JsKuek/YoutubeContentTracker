@@ -36,20 +36,6 @@ app.get('/api/youtube/channel/:channelId', async (req, res) => {
     }
 });
 
-// Helper function to filter out shorts
-// function isShort(duration) {
-//     if (!duration) return false;
-    
-//     const match = duration.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
-//     if (!match) return false;
-    
-//     const hours = parseInt((match[1] || '').replace('H', '')) || 0;
-//     const minutes = parseInt((match[2] || '').replace('M', '')) || 0;
-//     const seconds = parseInt((match[3] || '').replace('S', '')) || 0;
-    
-//     const totalSeconds = hours * 3600 + minutes * 60 + seconds;
-//     return totalSeconds <= 60; // Consider videos 60 seconds or less as shorts
-// }
 
 const { exec } = require('child_process');
 
@@ -146,16 +132,10 @@ app.post('/api/youtube/videos/metadata', async (req, res) => {
         console.log('📋 [Backend] Total metadata items fetched:', chunks.length);
 
         // Step 2: Extract video IDs for yt-dlp (skip this for now to isolate the issue)
-        // Let's first return all videos without yt-dlp filtering
-        console.log('🎬 [Backend] Returning all videos without filtering');
-        // res.json({ items: chunks });
 
-        // Comment out the yt-dlp filtering temporarily:
-        /**/
         const ytDlpChecks = await Promise.allSettled(
             chunks.map(item => getVideoFormat(item.id))
         );
-
         console.log('🔍 [Backend] yt-dlp checks completed:', ytDlpChecks.length);
         console.log('✅ [Backend] Successful checks:', ytDlpChecks.filter(r => r.status === 'fulfilled').length);
         console.log('❌ [Backend] Failed checks:', ytDlpChecks.filter(r => r.status === 'rejected').length);
@@ -186,9 +166,8 @@ app.post('/api/youtube/videos/metadata', async (req, res) => {
         console.log('📋 [Backend] Final filtered chunks:', filteredChunks.length);
 
         // Send the final response (only one response per request)
-        res.json({ items: filteredChunks });
-        /**/
-        
+        res.json({ items: filteredChunks });        
+
     } catch (error) {
         console.error('❌ [Backend] Error in /videos/metadata:', error);
         res.status(500).json({ error: error.message });
@@ -328,6 +307,3 @@ app.get('/api/youtube/videos/:videoIds', async (req, res) => {
 app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
 });
-
-// .env file (create this in your project root):
-// YOUTUBE_API_KEY=your_actual_youtube_api_key_here
