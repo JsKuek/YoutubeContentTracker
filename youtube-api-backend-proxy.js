@@ -6,6 +6,13 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Add cache object after imports
+const pLimit = require('p-limit');
+const ytDlpCache = new Map();
+const MAX_CONCURRENT_YTDLP = 5; // Limit concurrent yt-dlp calls
+const YTDLP_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const limit = pLimit(MAX_CONCURRENT_YTDLP);
+
 app.use(cors());
 app.use(express.json());
 app.use(express.static('public')); // Serve your frontend files
@@ -134,7 +141,7 @@ app.post('/api/youtube/videos/metadata', async (req, res) => {
         // Step 2: Extract video IDs for yt-dlp (skip this for now to isolate the issue)
 
         const ytDlpChecks = await Promise.allSettled(
-            chunks.map(item => getVideoFormat(item.id))
+            needsYtDlp.map(videoID => limit(() => getVideoFormat(videoID)))
         );
         console.log('🔍 [Backend] yt-dlp checks completed:', ytDlpChecks.length);
         console.log('✅ [Backend] Successful checks:', ytDlpChecks.filter(r => r.status === 'fulfilled').length);
