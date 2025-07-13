@@ -6,6 +6,13 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Add cache object after imports
+const pLimit = require('p-limit');
+const ytDlpCache = new Map();
+const MAX_CONCURRENT_YTDLP = 5; // Limit concurrent yt-dlp calls
+const YTDLP_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const limit = pLimit(MAX_CONCURRENT_YTDLP);
+
 app.use(cors());
 app.use(express.json());
 app.use(express.static('public')); // Serve your frontend files
@@ -36,25 +43,23 @@ app.get('/api/youtube/channel/:channelId', async (req, res) => {
     }
 });
 
-// Helper function to filter out shorts
-// function isShort(duration) {
-//     if (!duration) return false;
-    
-//     const match = duration.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
-//     if (!match) return false;
-    
-//     const hours = parseInt((match[1] || '').replace('H', '')) || 0;
-//     const minutes = parseInt((match[2] || '').replace('M', '')) || 0;
-//     const seconds = parseInt((match[3] || '').replace('S', '')) || 0;
-    
-//     const totalSeconds = hours * 3600 + minutes * 60 + seconds;
-//     return totalSeconds <= 60; // Consider videos 60 seconds or less as shorts
-// }
 
 const { exec } = require('child_process');
 
 // Accepts a video ID and returns resolution & aspect ratio
 function getVideoFormat(videoId) {
+    const now = Date.now();
+
+    // Cache hit and still valid
+    if (ytDlpCache.has(videoId)) {
+        const cached = ytDlpCache.get(videoId);
+        if (now - cached.timestamp < YTDLP_CACHE_TTL_MS) {
+            console.log(`🔄 [Backend] Cache hit for video ${videoId}, returning cached result`);
+            return Promise.resolve(cached.result);
+        }
+    }
+
+    // Cache miss or expired, run yt-dlp
     return new Promise((resolve, reject) => {
         const command = `yt-dlp -j --no-warnings --skip-download https://www.youtube.com/watch?v=${videoId}`;
         
@@ -80,7 +85,11 @@ function getVideoFormat(videoId) {
                 
                 console.log(`📐 [Backend] Video ${videoId}: ${width}x${height} (ratio: ${aspectRatio})`);
                 
-                resolve({ videoId, width, height, aspectRatio });
+                const result = { videoId, width, height, aspectRatio };
+                // Cache the result
+                ytDlpCache.set(videoId, { timestamp: now, result });
+
+                resolve(result);
             } catch (parseError) {
                 console.error(`❌ [Backend] JSON parse error for ${videoId}:`, parseError.message);
                 reject(new Error(`Failed to parse yt-dlp output for ${videoId}: ${parseError.message}`));
@@ -101,6 +110,32 @@ function isProbablyShortVideo({ width, height, aspectRatio }) {
     console.log(`📱 [Backend] Aspect ratio ${ratio} - ${isShort ? 'SHORT' : 'REGULAR'}`);
     
     return isShort;
+}
+
+// Heuristic check for shorts based on duration and title
+// This is a simple heuristic and may not be 100% accurate
+function isHeuristicallyShort(video) {
+    try {
+        const durationISO = video.contentDetails?.duration || '';
+        const title = video.snippet?.title?.toLowerCase() || '';
+
+        // Parse duration (e.g., PT59S, PT1M12S)
+        const durationMatch = durationISO.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
+        if (!durationMatch) return false;
+
+        const hours = parseInt(durationMatch[1]) || 0;
+        const minutes = parseInt(durationMatch[2]) || 0;
+        const seconds = parseInt(durationMatch[3]) || 0;
+        const totalSeconds = hours * 3600 + minutes * 60 + seconds;
+
+        const isShortByTime = totalSeconds <= 120; // 2 minutes in seconds
+        const isShortByTitle = title.includes('#shorts') || title.includes('#short');
+
+        return isShortByTime || isShortByTitle;
+    } catch (e) {
+        console.warn('⚠️ Heuristic check failed:', e.message);
+        return false;
+    }
 }
 
 // Accept list of video IDs for metadata fetch (title, duration, etc.)
@@ -145,37 +180,47 @@ app.post('/api/youtube/videos/metadata', async (req, res) => {
 
         console.log('📋 [Backend] Total metadata items fetched:', chunks.length);
 
-        // Step 2: Extract video IDs for yt-dlp (skip this for now to isolate the issue)
-        // Let's first return all videos without yt-dlp filtering
-        console.log('🎬 [Backend] Returning all videos without filtering');
-        // res.json({ items: chunks });
+        // Step 2: Process metadata to filter shorts and run yt-dlp checks
 
-        // Comment out the yt-dlp filtering temporarily:
-        /**/
+        // Heuristic check for shorts
+        const shortHeuristics = [];
+        const needsYtDlp = [];
+
+        for (const item of chunks) {
+            if (isHeuristicallyShort(item)) {
+                shortHeuristics.push(item.id); // List of video IDs that are heuristically identified as shorts
+            } else {
+                needsYtDlp.push(item.id);
+            }
+        }
+        console.log(`🔍 Heuristic SHORTS: ${shortHeuristics.length}, Need yt-dlp: ${needsYtDlp.length}`);
+        console.log(`🔧 Throttling yt-dlp to ${MAX_CONCURRENT_YTDLP} concurrent processes`);
+        console.log(`🎯 Total videos going through yt-dlp:`, needsYtDlp.length);
+
+        // If no videos need yt-dlp, return all videos
         const ytDlpChecks = await Promise.allSettled(
-            chunks.map(item => getVideoFormat(item.id))
+            needsYtDlp.map(videoID => limit(() => getVideoFormat(videoID)))
         );
-
         console.log('🔍 [Backend] yt-dlp checks completed:', ytDlpChecks.length);
         console.log('✅ [Backend] Successful checks:', ytDlpChecks.filter(r => r.status === 'fulfilled').length);
         console.log('❌ [Backend] Failed checks:', ytDlpChecks.filter(r => r.status === 'rejected').length);
-
         // Log failed checks for debugging
         const failedChecks = ytDlpChecks.filter(r => r.status === 'rejected');
         if (failedChecks.length > 0) {
             console.log('🚨 [Backend] Failed yt-dlp checks:', failedChecks.map(f => f.reason?.message || f.reason));
         }
 
-        // Step 3: Filter out shorts based on aspect ratio
-        const allowedVideoIds = ytDlpChecks
-            .filter(result => result.status === 'fulfilled')
-            .map(result => result.value)
-            .filter(format => {
-                const isShort = isProbablyShortVideo(format);
-                console.log(`📱 [Backend] Video ${format.videoId}: ${format.width}x${format.height} (${format.aspectRatio}) - ${isShort ? 'SHORT' : 'REGULAR'}`);
-                return !isShort;
-            })
-            .map(format => format.videoId);
+        // List of video IDs that passed yt-dlp checks and are not shorts
+        const filteredVideoIds = ytDlpChecks
+        .filter(result => result.status === 'fulfilled')
+        .map(result => result.value)
+        .filter(format => !isProbablyShortVideo(format))
+        .map(format => format.videoId);
+        
+        // Step 3: Filter chunks based on yt-dlp results and heuristics
+        const allowedVideoIds = chunks
+            .map(item => item.id)
+            .filter(id => !shortHeuristics.includes(id) && filteredVideoIds.includes(id));
 
         console.log('🎯 [Backend] Videos after filtering shorts:', allowedVideoIds.length);
 
@@ -186,9 +231,8 @@ app.post('/api/youtube/videos/metadata', async (req, res) => {
         console.log('📋 [Backend] Final filtered chunks:', filteredChunks.length);
 
         // Send the final response (only one response per request)
-        res.json({ items: filteredChunks });
-        /**/
-        
+        res.json({ items: filteredChunks });        
+
     } catch (error) {
         console.error('❌ [Backend] Error in /videos/metadata:', error);
         res.status(500).json({ error: error.message });
@@ -328,6 +372,3 @@ app.get('/api/youtube/videos/:videoIds', async (req, res) => {
 app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
 });
-
-// .env file (create this in your project root):
-// YOUTUBE_API_KEY=your_actual_youtube_api_key_here
