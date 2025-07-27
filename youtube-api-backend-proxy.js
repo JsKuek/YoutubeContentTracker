@@ -298,6 +298,167 @@ app.post('/api/youtube/videos/metadata', async (req, res) => {
     }
 });
 
+// Add this after your existing /api/youtube/videos/metadata endpoint
+app.post('/api/youtube/videos/metadata/stream', async (req, res) => {
+    try {
+        const { videoIds, batchSize = 10 } = req.body;
+        const API_KEY = process.env.YOUTUBE_API_KEY;
+
+        console.log('🔍 [Backend] Streaming video IDs:', videoIds?.length);
+
+        if (!videoIds || !Array.isArray(videoIds)) {
+            return res.status(400).json({ error: 'videoIds must be an array' });
+        }
+
+        if (videoIds.length === 0) {
+            console.log('⚠️ [Backend] Empty video IDs array');
+            res.writeHead(200, {
+                'Content-Type': 'application/x-ndjson',
+                'Transfer-Encoding': 'chunked',
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive'
+            });
+            res.write(JSON.stringify({ type: 'complete', totalVideos: 0, totalBatches: 0 }) + '\n');
+            res.end();
+            return;
+        }
+
+        // Set up streaming response
+        res.writeHead(200, {
+            'Content-Type': 'application/x-ndjson',
+            'Transfer-Encoding': 'chunked',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive'
+        });
+
+        // Step 1: Fetch all metadata from YouTube API first
+        const chunks = [];
+        for (let i = 0; i < videoIds.length; i += 50) {
+            const chunk = videoIds.slice(i, i + 50);
+            const idsParam = chunk.join(',');
+            
+            console.log(`📡 [Backend] Fetching metadata chunk ${Math.floor(i/50) + 1}: ${chunk.length} videos`);
+            
+            const response = await fetch(
+                `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${idsParam}&key=${API_KEY}`
+            );
+            
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('❌ [Backend] YouTube API error:', response.status, errorText);
+                throw new Error(`YouTube API error: ${response.status} - ${errorText}`);
+            }
+            
+            const data = await response.json();
+            chunks.push(...(data.items || []));
+        }
+
+        console.log('📋 [Backend] Total metadata items fetched:', chunks.length);
+
+        // Step 2: Heuristic filtering
+        const shortHeuristics = [];
+        const needsYtDlp = [];
+
+        for (const item of chunks) {
+            if (isHeuristicallyShort(item)) {
+                shortHeuristics.push(item.id);
+            } else {
+                needsYtDlp.push(item.id);
+            }
+        }
+        
+        console.log(`🔍 Heuristic SHORTS: ${shortHeuristics.length}, Need yt-dlp: ${needsYtDlp.length}`);
+
+        // Step 3: Process yt-dlp checks in batches and stream results
+        const totalBatches = Math.ceil(needsYtDlp.length / batchSize);
+        let processedCount = 0;
+        const allFilteredVideos = [];
+
+        for (let i = 0; i < needsYtDlp.length; i += batchSize) {
+            const batchNumber = Math.floor(i / batchSize) + 1;
+            const batch = needsYtDlp.slice(i, i + batchSize);
+            
+            console.log(`📦 [Backend] Processing yt-dlp batch ${batchNumber}/${totalBatches}: ${batch.length} videos`);
+            
+            const batchPromises = batch.map(id => 
+                limit(() => getVideoFormat(id).catch(err => ({ 
+                    videoId: id, 
+                    error: err.message,
+                    status: 'error'
+                })))
+            );
+            
+            const batchResults = await Promise.allSettled(batchPromises);
+            
+            // Process batch results
+            const processedBatch = batchResults.map(result => {
+                if (result.status === 'fulfilled') {
+                    return result.value;
+                } else {
+                    return {
+                        videoId: 'unknown',
+                        error: result.reason?.message || 'Unknown error',
+                        status: 'error'
+                    };
+                }
+            });
+
+            // Filter successful results and exclude shorts
+            const successfulResults = processedBatch.filter(result => !result.error && !result.status);
+            const filteredVideoIds = successfulResults
+                .filter(format => !isProbablyShortVideo(format))
+                .map(format => format.videoId);
+
+            // Get the actual video metadata for filtered videos
+            const batchFilteredVideos = chunks.filter(item =>
+                filteredVideoIds.includes(item.id)
+            );
+
+            allFilteredVideos.push(...batchFilteredVideos);
+            processedCount += batch.length;
+
+            // Stream this batch immediately
+            const batchResponse = {
+                type: 'batch',
+                batchNumber,
+                totalBatches,
+                videos: batchFilteredVideos, // Send actual video metadata
+                processedCount,
+                totalProcessed: processedCount,
+                totalToProcess: needsYtDlp.length
+            };
+            
+            res.write(JSON.stringify(batchResponse) + '\n');
+            
+            console.log(`✅ [Backend] Streamed batch ${batchNumber}: ${batchFilteredVideos.length} videos passed filter`);
+        }
+        
+        // Send completion signal
+        const completeResponse = {
+            type: 'complete',
+            totalVideos: allFilteredVideos.length,
+            totalBatches,
+            excludedShorts: shortHeuristics.length
+        };
+        
+        res.write(JSON.stringify(completeResponse) + '\n');
+        res.end();
+        
+        console.log(`🎉 [Backend] Streaming complete. Total filtered videos: ${allFilteredVideos.length}`);
+
+    } catch (error) {
+        console.error('❌ [Backend] Error in /videos/metadata/stream:', error);
+        
+        const errorResponse = {
+            type: 'error',
+            message: error.message
+        };
+        
+        res.write(JSON.stringify(errorResponse) + '\n');
+        res.end();
+    }
+});
+
 app.get('/api/youtube/channel/:channelId/videos', async (req, res) => {
     try {
         const { channelId } = req.params;
