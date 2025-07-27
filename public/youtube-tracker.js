@@ -106,7 +106,7 @@ class SecureYouTubeTracker {
 
             // Step 5: Finalize channel
             channel.isLoading = false;
-            channel.hasNewContent = this.checkForNewContent(channel.videos);
+            channel.hasNewContent = this.checkForNewContent(channel.videos, channel.lastChecked);
             this.saveChannels();
             this.renderChannels();
             
@@ -130,6 +130,12 @@ class SecureYouTubeTracker {
 
             const channel = this.channels.find(c => c.id === channelId);
             if (!channel) return;
+
+            // Clear videos first and set loading state to show progressive refresh
+            channel.videos = [];
+            channel.isLoading = true;
+            channel.loadingMessage = 'Starting refresh...';
+            this.renderChannels(); // Render to show cleared state
 
             const previousVideos = channel.videos || [];
             let newVideos;
@@ -258,11 +264,16 @@ class SecureYouTubeTracker {
         }
     }
 
-    checkForNewContent(videos) {
+    checkForNewContent(videos, lastChecked) {
         if (!videos || videos.length === 0) return false;
         
-        const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-        return videos.some(video => video.publishedAt > oneDayAgo);
+        if (!lastChecked) {
+            const threeDaysAgo = new Date(Date.now() - 72 * 60 * 60 * 1000);
+            return videos.some(video => video.publishedAt > threeDaysAgo);
+        }
+        
+        const lastCheckDate = new Date(lastChecked);
+        return videos.some(video => video.publishedAt > lastCheckDate);
     }
 
     formatDate(date) {
@@ -440,7 +451,9 @@ class SecureYouTubeTracker {
                                 <div class="video-thumbnail" onclick="window.open('${video.url}', '_blank')">
                                     <img src="${video.thumbnail}" alt="${this.escapeHtml(video.title)}" loading="lazy">
                                     <div class="video-duration">${video.duration}</div>
-                                    ${this.isNewVideo(video.publishedAt) ? '<div class="new-video-indicator">New</div>' : ''}
+
+                                    ${this.isNewVideotest(video.publishedAt, channel.lastChecked) ? '<div class="new-video-indicator">NEW</div>' : ''}
+
                                     <div class="video-overlay">
                                         <div class="video-title-thumb">${this.escapeHtml(video.title)}</div>
                                         <div class="video-date-thumb">${this.formatDate(video.publishedAt)}</div>
@@ -475,9 +488,22 @@ class SecureYouTubeTracker {
             .replace(/'/g, "&#039;");
     }
 
-    isNewVideo(publishedAt) {
-        const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-        return publishedAt > oneDayAgo;
+    isNewVideo(publishedAt, channelLastChecked) {
+        // If no previous check time, consider videos from last 72 hours as new
+        if (!channelLastChecked) {
+            const threeDaysAgo = new Date(Date.now() - 72 * 60 * 60 * 1000);
+            return publishedAt > threeDaysAgo;
+        }
+        
+        // Otherwise, check if video was published after the last check
+        const lastCheckDate = new Date(channelLastChecked);
+        return publishedAt > lastCheckDate;
+    }
+
+    isNewVideotest(publishedAt, channelLastChecked) {
+        // If no previous check time, consider videos from last 72 hours as new
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        return publishedAt > thirtyDaysAgo;
     }
 
     showLoading(show) {
