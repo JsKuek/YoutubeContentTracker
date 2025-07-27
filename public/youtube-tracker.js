@@ -332,23 +332,72 @@ class SecureYouTubeTracker {
                     return;
                 }
 
-                // Step 2: Get filtered metadata
-                const metadataResponse = await fetch(`${this.apiBaseUrl}/videos/metadata`, {
+                // Step 2: Send all videoIds but process them progressively
+                const allVideos = [];
+                let batchIndex = 0;
+
+                const metadataResponse = await fetch(`${this.apiBaseUrl}/videos/metadata/stream`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ videoIds })
+                    body: JSON.stringify({ 
+                        videoIds,
+                        batchSize: 10,
+                        channelId: channel.id // Send channel ID for tracking
+                    })
                 });
 
                 if (!metadataResponse.ok) {
                     const errorData = await metadataResponse.json();
-                    throw new Error(errorData.error || 'Failed to get video metadata');
+                    throw new Error(errorData.error || 'Failed to start video metadata streaming');
                 }
 
-                const metadataData = await metadataResponse.json();
-                const videos = await this.formatVideos(metadataData.items || []);
-                
-                // Update videos progressively
-                this.updateChannelVideos(channel, videos);
+                // Handle streaming response
+                const reader = metadataResponse.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                try {
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        
+                        if (done) break;
+                        
+                        buffer += decoder.decode(value, { stream: true });
+                        
+                        // Process each complete JSON line
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop(); // Keep incomplete line in buffer
+                        
+                        for (const line of lines) {
+                            if (line.trim()) {
+                                try {
+                                    const batchData = JSON.parse(line);
+                                    
+                                    if (batchData.type === 'batch') {
+                                        const batchVideos = await this.formatVideos(batchData.videos || []);
+                                        allVideos.push(...batchVideos);
+                                        
+                                        // Update UI with new batch
+                                        this.updateChannelVideos(channel, [...allVideos]);
+                                        batchIndex++;
+                                        
+                                    } else if (batchData.type === 'complete') {
+                                        console.log('All batches processed:', batchData.totalVideos);
+                                        break;
+                                    } else if (batchData.type === 'error') {
+                                        throw new Error(batchData.message);
+                                    }
+                                } catch (parseError) {
+                                    console.error('Error parsing batch data:', parseError);
+                                }
+                            }
+                        }
+                    }
+                } finally {
+                    reader.releaseLock();
+                }
+
+
             }
         } catch (error) {
             console.error('Error loading videos:', error);
@@ -356,8 +405,16 @@ class SecureYouTubeTracker {
         }
     }
 
-    updateChannelVideos(channel, newVideos) {
+    updateChannelVideos(channel, newVideos, batchInfo = null) {
         channel.videos = newVideos;
+        // Show loading state if videos are being fetched
+        if (newVideos.length === 0 && channel.isLoading) {
+            channel.loadingMessage = 'Starting batch processing...';
+        } else if (channel.isLoading && batchInfo) {
+            channel.loadingMessage = `Processing batch ${batchInfo.current}/${batchInfo.total} (${newVideos.length} videos loaded)`;
+        } else if (channel.isLoading) {
+            channel.loadingMessage = `Loading... (${newVideos.length} videos loaded)`;
+        }
         this.renderChannels(); // Re-render to show updated videos
     }
 
