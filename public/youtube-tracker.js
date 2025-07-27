@@ -158,21 +158,14 @@ class SecureYouTubeTracker {
                     .map(item => item.id?.videoId || item.id)
                     .filter(Boolean);
 
-                // Step 2: Call /videos/metadata to get filtered list
-                const metadataResponse = await fetch(`${this.apiBaseUrl}/videos/metadata`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ videoIds })
-                });
-
-                if (!metadataResponse.ok) {
-                    const errorData = await metadataResponse.json();
-                    throw new Error(errorData.error || 'Failed to fetch filtered video metadata during refresh');
+                if (!videoIds.length) {
+                    newVideos = [];
+                    channel.isLoading = false;
+                } else {
+                    // Step 2: Use streaming endpoint for progressive updates
+                    newVideos = await this.streamVideoMetadata(videoIds, channel, 10);
+                    channel.isLoading = false;
                 }
-
-                const metadataData = await metadataResponse.json();
-                console.log('metadataData.items sample:', metadataData.items?.[0]);
-                newVideos = await this.formatVideos(metadataData.items || []);
             }
 
             // Update channel object
@@ -202,30 +195,28 @@ class SecureYouTubeTracker {
     }
 
     async formatVideos(videoItems) {
-    console.log('🎬 formatVideos called with:', videoItems?.length || 0, 'items');
-    
-    if (!videoItems || videoItems.length === 0) {
-        console.log('⚠️ No video items to format');
-        return [];
-    }
-    
-    console.log('📝 First video item structure:', videoItems[0]);
-    
-    return videoItems.map((item, index) => {
-        console.log(`🎯 Processing video ${index + 1}:`, item.id);
+        console.log('🎬 formatVideos called with:', videoItems?.length || 0, 'items');
         
-        return {
-            id: item.id,
-            title: item.snippet?.title || 'No Title',
-            thumbnail: item.snippet?.thumbnails?.medium?.url || item.snippet?.thumbnails?.default?.url,
-            url: `https://www.youtube.com/watch?v=${item.id}`,
-            publishedAt: new Date(item.snippet?.publishedAt || Date.now()),
-            duration: this.parseDuration(item.contentDetails?.duration || 'PT0S')
-        };
-    });
-}
-
-
+        if (!videoItems || videoItems.length === 0) {
+            console.log('⚠️ No video items to format');
+            return [];
+        }
+        
+        console.log('📝 First video item structure:', videoItems[0]);
+        
+        return videoItems.map((item, index) => {
+            console.log(`🎯 Processing video ${index + 1}:`, item.id);
+            
+            return {
+                id: item.id,
+                title: item.snippet?.title || 'No Title',
+                thumbnail: item.snippet?.thumbnails?.medium?.url || item.snippet?.thumbnails?.default?.url,
+                url: `https://www.youtube.com/watch?v=${item.id}`,
+                publishedAt: new Date(item.snippet?.publishedAt || Date.now()),
+                duration: this.parseDuration(item.contentDetails?.duration || 'PT0S')
+            };
+        });
+    }
 
     async formatPlaylistVideos(playlistItems) {
         const videoIds = playlistItems.map(item => item.snippet.resourceId.videoId).join(',');
@@ -333,77 +324,73 @@ class SecureYouTubeTracker {
                 }
 
                 // Step 2: Send all videoIds but process them progressively
-                const allVideos = [];
-                let batchIndex = 0;
-
-                const metadataResponse = await fetch(`${this.apiBaseUrl}/videos/metadata/stream`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        videoIds,
-                        batchSize: 10,
-                        channelId: channel.id // Send channel ID for tracking
-                    })
-                });
-
-                if (!metadataResponse.ok) {
-                    const errorData = await metadataResponse.json();
-                    throw new Error(errorData.error || 'Failed to start video metadata streaming');
-                }
-
-                // Handle streaming response
-                const reader = metadataResponse.body.getReader();
-                const decoder = new TextDecoder();
-                let buffer = '';
-
-                try {
-                    while (true) {
-                        const { done, value } = await reader.read();
-                        
-                        if (done) break;
-                        
-                        buffer += decoder.decode(value, { stream: true });
-                        
-                        // Process each complete JSON line
-                        const lines = buffer.split('\n');
-                        buffer = lines.pop(); // Keep incomplete line in buffer
-                        
-                        for (const line of lines) {
-                            if (line.trim()) {
-                                try {
-                                    const batchData = JSON.parse(line);
-                                    
-                                    if (batchData.type === 'batch') {
-                                        const batchVideos = await this.formatVideos(batchData.videos || []);
-                                        allVideos.push(...batchVideos);
-                                        
-                                        // Update UI with new batch
-                                        this.updateChannelVideos(channel, [...allVideos]);
-                                        batchIndex++;
-                                        
-                                    } else if (batchData.type === 'complete') {
-                                        console.log('All batches processed:', batchData.totalVideos);
-                                        break;
-                                    } else if (batchData.type === 'error') {
-                                        throw new Error(batchData.message);
-                                    }
-                                } catch (parseError) {
-                                    console.error('Error parsing batch data:', parseError);
-                                }
-                            }
-                        }
-                    }
-                } finally {
-                    reader.releaseLock();
-                }
-
-
+                await this.streamVideoMetadata(videoIds, channel, 10);
             }
         } catch (error) {
             console.error('Error loading videos:', error);
             this.showError('Error loading videos: ' + error.message);
         }
     }
+
+    async streamVideoMetadata(videoIds, channel, batchSize = 10) {
+        const metadataResponse = await fetch(`${this.apiBaseUrl}/videos/metadata/stream`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                videoIds,
+                batchSize,
+                channelId: channel.id
+            })
+        });
+
+        if (!metadataResponse.ok) {
+            const errorData = await metadataResponse.json();
+            throw new Error(errorData.error || 'Failed to start video metadata streaming');
+        }
+
+        const reader = metadataResponse.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        const allVideos = [];
+
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+                
+                for (const line of lines) {
+                    if (line.trim()) {
+                        try {
+                            const batchData = JSON.parse(line);
+                            
+                            if (batchData.type === 'batch') {
+                                const batchVideos = await this.formatVideos(batchData.videos || []);
+                                allVideos.push(...batchVideos);
+                                this.updateChannelVideos(channel, [...allVideos]);
+                                
+                            } else if (batchData.type === 'complete') {
+                                console.log('Streaming completed:', batchData.totalVideos);
+                                break;
+                            } else if (batchData.type === 'error') {
+                                throw new Error(batchData.message);
+                            }
+                        } catch (parseError) {
+                            console.error('Error parsing batch data:', parseError);
+                        }
+                    }
+                }
+            }
+        } finally {
+            reader.releaseLock();
+        }
+        
+        return allVideos;
+    }
+
 
     updateChannelVideos(channel, newVideos, batchInfo = null) {
         channel.videos = newVideos;
