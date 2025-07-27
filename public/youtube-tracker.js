@@ -131,6 +131,12 @@ class SecureYouTubeTracker {
             const channel = this.channels.find(c => c.id === channelId);
             if (!channel) return;
 
+            // Clear videos first and set loading state to show progressive refresh
+            channel.videos = [];
+            channel.isLoading = true;
+            channel.loadingMessage = 'Starting refresh...';
+            this.renderChannels(); // Render to show cleared state
+
             const previousVideos = channel.videos || [];
             let newVideos;
 
