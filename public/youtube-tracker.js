@@ -47,9 +47,9 @@ class SecureYouTubeTracker {
 
         try {
             this.hideError();
-            this.showLoading(true);
+            this.showProgressiveLoading(true);
             
-            // Get channel ID through backend proxy
+            // Step 1: Get channel ID through backend proxy
             const channelIdResponse = await fetch(`${this.apiBaseUrl}/extract-channel-id`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -63,104 +63,27 @@ class SecureYouTubeTracker {
             
             const { channelId, playlistId, type } = await channelIdResponse.json();
             
-            let contentInfo, videos;
-            
+            // Step 2: Get basic channel/playlist info and show preview
+            let contentInfo;
             if (type === 'playlist') {
-                // Get playlist info
                 const playlistResponse = await fetch(`${this.apiBaseUrl}/playlist/${playlistId}`);
                 if (!playlistResponse.ok) {
                     const errorData = await playlistResponse.json();
                     throw new Error(errorData.error || 'Failed to get playlist information');
                 }
                 const playlistData = await playlistResponse.json();
-                if (!playlistData.items || playlistData.items.length === 0) {
-                    throw new Error('Playlist not found');
-                }
                 contentInfo = playlistData.items[0];
-                
-                // Get playlist videos
-                const videosResponse = await fetch(`${this.apiBaseUrl}/playlist/${playlistId}/videos?maxResults=6`);
-                if (!videosResponse.ok) {
-                    const errorData = await videosResponse.json();
-                    throw new Error(errorData.error || 'Failed to get playlist videos');
-                }
-                const videosData = await videosResponse.json();
-                videos = await this.formatPlaylistVideos(videosData.items || []);
             } else {
-                // Get channel info through backend proxy
-
-                // Step 1: Get channel info
                 const channelInfoResponse = await fetch(`${this.apiBaseUrl}/channel/${channelId}`);
                 if (!channelInfoResponse.ok) {
                     const errorData = await channelInfoResponse.json();
                     throw new Error(errorData.error || 'Failed to get channel information');
                 }
-                
                 const channelData = await channelInfoResponse.json();
-                if (!channelData.items || channelData.items.length === 0) {
-                    throw new Error('Channel not found');
-                }
                 contentInfo = channelData.items[0];
-
-                // Step 2: Fetch videos via /channel/:id/videos (unfiltered)
-                console.log('🔍 Fetching videos for channelId:', channelId);
-                const videosResponse = await fetch(`${this.apiBaseUrl}/channel/${channelId}/videos?maxResults=6`);
-                if (!videosResponse.ok) {
-                    const errorData = await videosResponse.json();
-                    throw new Error(errorData.error || 'Failed to get channel videos');
-                }
-
-                // all videos
-                const videosData = await videosResponse.json();
-                console.log('📺 Raw videos data:', videosData);
-
-                const rawItems = videosData.items || [];
-                console.log('🎬 Raw items count:', rawItems.length);
-
-                if (rawItems.length > 0) {
-                    console.log('📝 First raw item structure:', rawItems[0]);
-                }
-
-                const videoIds = rawItems
-                    .map(item => {
-                        const videoId = item.id?.videoId || item.id;
-                        console.log('🆔 Extracted video ID:', videoId, 'from item:', item.id);
-                        return videoId;
-                    })
-                    .filter(Boolean);
-
-                console.log('🎯 Final video IDs:', videoIds);
-
-                if (!videoIds.length) {
-                    throw new Error('No video IDs to fetch metadata for.');
-                }
-                console.log('Fetching metadata for videoIds:', videoIds); // Debug log
-
-                // Step 3: POST video IDs to /videos/metadata for yt-dlp filtering
-                console.log('📡 Fetching metadata for videoIds:', videoIds);
-                const metadataResponse = await fetch(`${this.apiBaseUrl}/videos/metadata`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ videoIds }),
-                });
-
-                if (!metadataResponse.ok) {
-                    const errorData = await metadataResponse.json();
-                    throw new Error(errorData.error || 'Failed to get filtered video metadata');
-                }
-
-                const metadataData = await metadataResponse.json();
-                console.log('🔬 Metadata response:', metadataData);
-                console.log('📊 Metadata items count:', metadataData.items?.length || 0);
-
-                if (metadataData.items && metadataData.items.length > 0) {
-                    console.log('📋 First metadata item:', metadataData.items[0]);
-                }
-
-                videos = await this.formatVideos(metadataData.items || []);
-                console.log('🎥 Final formatted videos:', videos);
             }
 
+            // Create channel object with basic info
             const channel = {
                 id: Date.now(),
                 name: name,
@@ -169,11 +92,21 @@ class SecureYouTubeTracker {
                 contentType: type || 'channel',
                 thumbnail: contentInfo.snippet.thumbnails.default?.url || contentInfo.snippet.thumbnails.high?.url,
                 lastChecked: new Date().toISOString(),
-                videos: videos,
-                hasNewContent: this.checkForNewContent(videos)
+                videos: [],
+                hasNewContent: false,
+                isLoading: true // Add loading state
             };
 
+            // Step 3: Show channel preview immediately
             this.channels.push(channel);
+            this.showChannelPreview(channel);
+
+            // Step 4: Load videos progressively
+            await this.loadVideosProgressive(channel, type);
+
+            // Step 5: Finalize channel
+            channel.isLoading = false;
+            channel.hasNewContent = this.checkForNewContent(channel.videos);
             this.saveChannels();
             this.renderChannels();
             
@@ -184,7 +117,7 @@ class SecureYouTubeTracker {
             console.error('Error adding channel:', error);
             this.showError('Error adding channel: ' + error.message);
         } finally {
-            this.showLoading(false);
+            this.showProgressiveLoading(false);
         }
     }
 
@@ -202,7 +135,7 @@ class SecureYouTubeTracker {
             let newVideos;
 
             if (channel.contentType === 'playlist') {
-                const response = await fetch(`${this.apiBaseUrl}/playlist/${channel.channelId}/videos?maxResults=6`);
+                const response = await fetch(`${this.apiBaseUrl}/playlist/${channel.channelId}/videos`);
                 if (!response.ok) {
                     const errorData = await response.json();
                     throw new Error(errorData.error || 'Failed to refresh playlist');
@@ -212,7 +145,7 @@ class SecureYouTubeTracker {
                 newVideos = await this.formatPlaylistVideos(data.items || []);
             } else {
                 // Step 1: Fetch raw videos
-                const videosResponse = await fetch(`${this.apiBaseUrl}/channel/${channel.channelId}/videos?maxResults=12`);
+                const videosResponse = await fetch(`${this.apiBaseUrl}/channel/${channel.channelId}/videos`);
                 if (!videosResponse.ok) {
                     const errorData = await videosResponse.json();
                     throw new Error(errorData.error || 'Failed to get channel videos during refresh');
@@ -225,21 +158,14 @@ class SecureYouTubeTracker {
                     .map(item => item.id?.videoId || item.id)
                     .filter(Boolean);
 
-                // Step 2: Call /videos/metadata to get filtered list
-                const metadataResponse = await fetch(`${this.apiBaseUrl}/videos/metadata`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ videoIds })
-                });
-
-                if (!metadataResponse.ok) {
-                    const errorData = await metadataResponse.json();
-                    throw new Error(errorData.error || 'Failed to fetch filtered video metadata during refresh');
+                if (!videoIds.length) {
+                    newVideos = [];
+                    channel.isLoading = false;
+                } else {
+                    // Step 2: Use streaming endpoint for progressive updates
+                    newVideos = await this.streamVideoMetadata(videoIds, channel, 10);
+                    channel.isLoading = false;
                 }
-
-                const metadataData = await metadataResponse.json();
-                console.log('metadataData.items sample:', metadataData.items?.[0]);
-                newVideos = await this.formatVideos(metadataData.items || []);
             }
 
             // Update channel object
@@ -269,30 +195,28 @@ class SecureYouTubeTracker {
     }
 
     async formatVideos(videoItems) {
-    console.log('🎬 formatVideos called with:', videoItems?.length || 0, 'items');
-    
-    if (!videoItems || videoItems.length === 0) {
-        console.log('⚠️ No video items to format');
-        return [];
-    }
-    
-    console.log('📝 First video item structure:', videoItems[0]);
-    
-    return videoItems.map((item, index) => {
-        console.log(`🎯 Processing video ${index + 1}:`, item.id);
+        console.log('🎬 formatVideos called with:', videoItems?.length || 0, 'items');
         
-        return {
-            id: item.id,
-            title: item.snippet?.title || 'No Title',
-            thumbnail: item.snippet?.thumbnails?.medium?.url || item.snippet?.thumbnails?.default?.url,
-            url: `https://www.youtube.com/watch?v=${item.id}`,
-            publishedAt: new Date(item.snippet?.publishedAt || Date.now()),
-            duration: this.parseDuration(item.contentDetails?.duration || 'PT0S')
-        };
-    });
-}
-
-
+        if (!videoItems || videoItems.length === 0) {
+            console.log('⚠️ No video items to format');
+            return [];
+        }
+        
+        console.log('📝 First video item structure:', videoItems[0]);
+        
+        return videoItems.map((item, index) => {
+            console.log(`🎯 Processing video ${index + 1}:`, item.id);
+            
+            return {
+                id: item.id,
+                title: item.snippet?.title || 'No Title',
+                thumbnail: item.snippet?.thumbnails?.medium?.url || item.snippet?.thumbnails?.default?.url,
+                url: `https://www.youtube.com/watch?v=${item.id}`,
+                publishedAt: new Date(item.snippet?.publishedAt || Date.now()),
+                duration: this.parseDuration(item.contentDetails?.duration || 'PT0S')
+            };
+        });
+    }
 
     async formatPlaylistVideos(playlistItems) {
         const videoIds = playlistItems.map(item => item.snippet.resourceId.videoId).join(',');
@@ -347,6 +271,140 @@ class SecureYouTubeTracker {
         );
     }
 
+    showProgressiveLoading(show) {
+        const addBtn = document.querySelector('.add-btn');
+        addBtn.disabled = show;
+        addBtn.textContent = show ? '🔄 Loading channel...' : 'Add Channel';
+    }
+
+    showChannelPreview(channel) {
+        // Update the grid to show the channel card immediately with loading state
+        this.renderChannels();
+        
+        // Scroll to the new channel card
+        setTimeout(() => {
+            const channelCards = document.querySelectorAll('.channel-card');
+            const newCard = channelCards[channelCards.length - 1];
+            if (newCard) {
+                newCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }, 100);
+    }
+
+    async loadVideosProgressive(channel, type) {
+        try {
+            if (type === 'playlist') {
+                const response = await fetch(`${this.apiBaseUrl}/playlist/${channel.channelId}/videos`);
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || 'Failed to get playlist videos');
+                }
+                const data = await response.json();
+                const videos = await this.formatPlaylistVideos(data.items || []);
+                
+                // Update videos progressively (simulate batching for playlists)
+                this.updateChannelVideos(channel, videos);
+            } else {
+                // Step 1: Get raw video list
+                const videosResponse = await fetch(`${this.apiBaseUrl}/channel/${channel.channelId}/videos`);
+                if (!videosResponse.ok) {
+                    const errorData = await videosResponse.json();
+                    throw new Error(errorData.error || 'Failed to get channel videos');
+                }
+
+                const videosData = await videosResponse.json();
+                const rawItems = videosData.items || [];
+                const videoIds = rawItems
+                    .map(item => item.id?.videoId || item.id)
+                    .filter(Boolean);
+
+                if (!videoIds.length) {
+                    this.updateChannelVideos(channel, []);
+                    return;
+                }
+
+                // Step 2: Send all videoIds but process them progressively
+                await this.streamVideoMetadata(videoIds, channel, 10);
+            }
+        } catch (error) {
+            console.error('Error loading videos:', error);
+            this.showError('Error loading videos: ' + error.message);
+        }
+    }
+
+    async streamVideoMetadata(videoIds, channel, batchSize = 10) {
+        const metadataResponse = await fetch(`${this.apiBaseUrl}/videos/metadata/stream`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                videoIds,
+                batchSize,
+                channelId: channel.id
+            })
+        });
+
+        if (!metadataResponse.ok) {
+            const errorData = await metadataResponse.json();
+            throw new Error(errorData.error || 'Failed to start video metadata streaming');
+        }
+
+        const reader = metadataResponse.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        const allVideos = [];
+
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+                
+                for (const line of lines) {
+                    if (line.trim()) {
+                        try {
+                            const batchData = JSON.parse(line);
+                            
+                            if (batchData.type === 'batch') {
+                                const batchVideos = await this.formatVideos(batchData.videos || []);
+                                allVideos.push(...batchVideos);
+                                this.updateChannelVideos(channel, [...allVideos]);
+                                
+                            } else if (batchData.type === 'complete') {
+                                console.log('Streaming completed:', batchData.totalVideos);
+                                break;
+                            } else if (batchData.type === 'error') {
+                                throw new Error(batchData.message);
+                            }
+                        } catch (parseError) {
+                            console.error('Error parsing batch data:', parseError);
+                        }
+                    }
+                }
+            }
+        } finally {
+            reader.releaseLock();
+        }
+        
+        return allVideos;
+    }
+
+
+    updateChannelVideos(channel, newVideos, batchInfo = null) {
+        channel.videos = newVideos;
+        // Show loading state if videos are being fetched
+        if (newVideos.length === 0 && channel.isLoading) {
+            channel.loadingMessage = 'Starting batch processing...';
+        } else if (channel.isLoading && batchInfo) {
+            channel.loadingMessage = `Processing batch ${batchInfo.current}/${batchInfo.total} (${newVideos.length} videos loaded)`;
+        } else if (channel.isLoading) {
+            channel.loadingMessage = `Loading... (${newVideos.length} videos loaded)`;
+        }
+        this.renderChannels(); // Re-render to show updated videos
+    }
+
     renderChannels() {
         const grid = document.getElementById('channelsGrid');
         
@@ -371,19 +429,26 @@ class SecureYouTubeTracker {
                 
                 <div class="videos-section">
                     <div class="videos-title">Recent Videos</div>
-                    <div class="videos-grid">
-                        ${channel.videos.slice(0, 6).map(video => `
-                            <div class="video-thumbnail" onclick="window.open('${video.url}', '_blank')">
-                                <img src="${video.thumbnail}" alt="${this.escapeHtml(video.title)}" loading="lazy">
-                                <div class="video-duration">${video.duration}</div>
-                                ${this.isNewVideo(video.publishedAt) ? '<div class="new-video-indicator">New</div>' : ''}
-                                <div class="video-overlay">
-                                    <div class="video-title-thumb">${this.escapeHtml(video.title)}</div>
-                                    <div class="video-date-thumb">${this.formatDate(video.publishedAt)}</div>
+                    ${channel.isLoading ? `
+                        <div class="videos-loading">
+                            <div class="loading-spinner">🔄</div>
+                            <p>Loading videos...</p>
+                        </div>
+                    ` : `
+                        <div class="videos-grid">
+                            ${channel.videos.slice(0, 6).map(video => `
+                                <div class="video-thumbnail" onclick="window.open('${video.url}', '_blank')">
+                                    <img src="${video.thumbnail}" alt="${this.escapeHtml(video.title)}" loading="lazy">
+                                    <div class="video-duration">${video.duration}</div>
+                                    ${this.isNewVideo(video.publishedAt) ? '<div class="new-video-indicator">New</div>' : ''}
+                                    <div class="video-overlay">
+                                        <div class="video-title-thumb">${this.escapeHtml(video.title)}</div>
+                                        <div class="video-date-thumb">${this.formatDate(video.publishedAt)}</div>
+                                    </div>
                                 </div>
-                            </div>
-                        `).join('')}
-                    </div>
+                            `).join('')}
+                        </div>
+                    `}
                 </div>
 
                 <div class="channel-actions">
