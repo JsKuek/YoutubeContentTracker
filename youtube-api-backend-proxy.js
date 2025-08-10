@@ -6,12 +6,6 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Add cache object after imports
-const pLimit = require('p-limit');
-const MAX_CONCURRENT_YTDLP = 3; // Limit concurrent yt-dlp calls
-const YTDLP_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
-const limit = pLimit(MAX_CONCURRENT_YTDLP);
-
 app.use(cors());
 app.use(express.json());
 app.use(express.static('public')); // Serve your frontend files
@@ -41,8 +35,6 @@ app.get('/api/youtube/channel/:channelId', async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
-
-const { exec } = require('child_process');
 
 // Accepts a video ID and returns resolution & aspect ratio
 function getVideoFormat(videoId) {
@@ -126,7 +118,7 @@ function isHeuristicallyShort(video) {
 }
 
 // Process videos in batches with priority and progress updates
-async function processVideosInBatches(videoIds, batchSize = 10, progressCallback = null) {
+async function processVideosInBatches(videoIds, batchSize = 30, progressCallback = null) {
     const results = [];
     const totalBatches = Math.ceil(videoIds.length / batchSize);
     
@@ -223,59 +215,10 @@ app.post('/api/youtube/videos/metadata', async (req, res) => {
 
         console.log('📋 [Backend] Total metadata items fetched:', chunks.length);
 
-        // Step 2: Process metadata to filter shorts and run yt-dlp checks
-
-        // Heuristic check for shorts
-        const shortHeuristics = [];
-        const needsYtDlp = [];
-
-        for (const item of chunks) {
-            if (isHeuristicallyShort(item)) {
-                shortHeuristics.push(item.id); // List of video IDs that are heuristically identified as shorts
-            } else {
-                needsYtDlp.push(item.id);
-            }
-        }
-        
-        console.log(`🔍 Heuristic SHORTS: ${shortHeuristics.length}, Need yt-dlp: ${needsYtDlp.length}`);
-        console.log(`🔧 Processing yt-dlp with ${MAX_CONCURRENT_YTDLP} concurrent processes`);
-
-        // Step 3: Use batch processing for yt-dlp checks
-        const ytDlpResults = await processVideosInBatches(needsYtDlp, 10, (progress) => {
-            console.log(`📊 [Backend] Progress: ${progress.processed}/${progress.total} videos processed`);
-            // You can emit progress updates here if using WebSockets/SSE
-        });
-
-        console.log('🔍 [Backend] yt-dlp batch processing completed:', ytDlpResults.length);
-        
-        // Filter successful results and exclude shorts
-        const successfulResults = ytDlpResults.filter(result => !result.error && !result.status);
-        const failedResults = ytDlpResults.filter(result => result.error || result.status === 'error');
-        
-        console.log('✅ [Backend] Successful yt-dlp checks:', successfulResults.length);
-        console.log('❌ [Backend] Failed yt-dlp checks:', failedResults.length);
-        
-        if (failedResults.length > 0) {
-            console.log('🚨 [Backend] Failed yt-dlp checks:', failedResults.map(f => f.error || 'Unknown error'));
-        }
-
-        // List of video IDs that passed yt-dlp checks and are not shorts
-        const filteredVideoIds = successfulResults
-            .filter(format => !isProbablyShortVideo(format))
-            .map(format => format.videoId);
-        
-        // Step 4: Filter chunks based on yt-dlp results and heuristics
-        const allowedVideoIds = chunks
-            .map(item => item.id)
-            .filter(id => !shortHeuristics.includes(id) && filteredVideoIds.includes(id));
-
-        console.log('🎯 [Backend] Videos after filtering shorts:', allowedVideoIds.length);
-
-        const filteredChunks = chunks.filter(item =>
-            allowedVideoIds.includes(item.id)
-        );
-
-        console.log('📋 [Backend] Final filtered chunks:', filteredChunks.length);
+        // Step 2: Process metadata to filter shorts
+        // Filter out shorts using heuristic method only
+        const filteredChunks = chunks.filter(item => !isHeuristicallyShort(item));
+        console.log('🎯 [Backend] Videos after filtering shorts:', filteredChunks.length);
 
         // Send the final response
         res.json({ items: filteredChunks });        
@@ -289,7 +232,7 @@ app.post('/api/youtube/videos/metadata', async (req, res) => {
 // Add this after your existing /api/youtube/videos/metadata endpoint
 app.post('/api/youtube/videos/metadata/stream', async (req, res) => {
     try {
-        const { videoIds, batchSize = 10 } = req.body;
+        const { videoIds, batchSize = 50 } = req.body;
         const API_KEY = process.env.YOUTUBE_API_KEY;
 
         console.log('🔍 [Backend] Streaming video IDs:', videoIds?.length);
@@ -319,14 +262,18 @@ app.post('/api/youtube/videos/metadata/stream', async (req, res) => {
             'Connection': 'keep-alive'
         });
 
-        // Step 1: Fetch all metadata from YouTube API first
-        const chunks = [];
-        for (let i = 0; i < videoIds.length; i += 50) {
-            const chunk = videoIds.slice(i, i + 50);
-            const idsParam = chunk.join(',');
+        const totalBatches = Math.ceil(videoIds.length / batchSize);
+        let processedCount = 0;
+        const allFilteredVideos = [];
+
+        for (let i = 0; i < videoIds.length; i += batchSize) {
+            const batchNumber = Math.floor(i / batchSize) + 1;
+            const batch = videoIds.slice(i, i + batchSize);
             
-            console.log(`📡 [Backend] Fetching metadata chunk ${Math.floor(i/50) + 1}: ${chunk.length} videos`);
+            console.log(`📦 [Backend] Processing batch ${batchNumber}/${totalBatches}: ${batch.length} videos`);
             
+            // Fetch metadata for this batch
+            const idsParam = batch.join(',');
             const response = await fetch(
                 `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${idsParam}&key=${API_KEY}`
             );
@@ -334,75 +281,16 @@ app.post('/api/youtube/videos/metadata/stream', async (req, res) => {
             if (!response.ok) {
                 const errorText = await response.text();
                 console.error('❌ [Backend] YouTube API error:', response.status, errorText);
-                throw new Error(`YouTube API error: ${response.status} - ${errorText}`);
+                continue; // Skip this batch but continue with others
             }
             
             const data = await response.json();
-            chunks.push(...(data.items || []));
-        }
-
-        console.log('📋 [Backend] Total metadata items fetched:', chunks.length);
-
-        // Step 2: Heuristic filtering
-        const shortHeuristics = [];
-        const needsYtDlp = [];
-
-        for (const item of chunks) {
-            if (isHeuristicallyShort(item)) {
-                shortHeuristics.push(item.id);
-            } else {
-                needsYtDlp.push(item.id);
-            }
-        }
-        
-        console.log(`🔍 Heuristic SHORTS: ${shortHeuristics.length}, Need yt-dlp: ${needsYtDlp.length}`);
-
-        // Step 3: Process yt-dlp checks in batches and stream results
-        const totalBatches = Math.ceil(needsYtDlp.length / batchSize);
-        let processedCount = 0;
-        const allFilteredVideos = [];
-
-        for (let i = 0; i < needsYtDlp.length; i += batchSize) {
-            const batchNumber = Math.floor(i / batchSize) + 1;
-            const batch = needsYtDlp.slice(i, i + batchSize);
+            const batchItems = data.items || [];
             
-            console.log(`📦 [Backend] Processing yt-dlp batch ${batchNumber}/${totalBatches}: ${batch.length} videos`);
+            // Filter shorts from this batch
+            const filteredBatchVideos = batchItems.filter(item => !isHeuristicallyShort(item));
             
-            const batchPromises = batch.map(id => 
-                limit(() => getVideoFormat(id).catch(err => ({ 
-                    videoId: id, 
-                    error: err.message,
-                    status: 'error'
-                })))
-            );
-            
-            const batchResults = await Promise.allSettled(batchPromises);
-            
-            // Process batch results
-            const processedBatch = batchResults.map(result => {
-                if (result.status === 'fulfilled') {
-                    return result.value;
-                } else {
-                    return {
-                        videoId: 'unknown',
-                        error: result.reason?.message || 'Unknown error',
-                        status: 'error'
-                    };
-                }
-            });
-
-            // Filter successful results and exclude shorts
-            const successfulResults = processedBatch.filter(result => !result.error && !result.status);
-            const filteredVideoIds = successfulResults
-                .filter(format => !isProbablyShortVideo(format))
-                .map(format => format.videoId);
-
-            // Get the actual video metadata for filtered videos
-            const batchFilteredVideos = chunks.filter(item =>
-                filteredVideoIds.includes(item.id)
-            );
-
-            allFilteredVideos.push(...batchFilteredVideos);
+            allFilteredVideos.push(...filteredBatchVideos);
             processedCount += batch.length;
 
             // Stream this batch immediately
@@ -410,15 +298,15 @@ app.post('/api/youtube/videos/metadata/stream', async (req, res) => {
                 type: 'batch',
                 batchNumber,
                 totalBatches,
-                videos: batchFilteredVideos, // Send actual video metadata
+                videos: filteredBatchVideos,
                 processedCount,
                 totalProcessed: processedCount,
-                totalToProcess: needsYtDlp.length
+                totalToProcess: videoIds.length
             };
             
             res.write(JSON.stringify(batchResponse) + '\n');
             
-            console.log(`✅ [Backend] Streamed batch ${batchNumber}: ${batchFilteredVideos.length} videos passed filter`);
+            console.log(`✅ [Backend] Streamed batch ${batchNumber}: ${filteredBatchVideos.length} videos passed filter`);
         }
         
         // Send completion signal
@@ -426,7 +314,6 @@ app.post('/api/youtube/videos/metadata/stream', async (req, res) => {
             type: 'complete',
             totalVideos: allFilteredVideos.length,
             totalBatches,
-            excludedShorts: shortHeuristics.length
         };
         
         res.write(JSON.stringify(completeResponse) + '\n');
