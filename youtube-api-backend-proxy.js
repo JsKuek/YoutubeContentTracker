@@ -8,8 +8,7 @@ const PORT = process.env.PORT || 3001;
 
 // Add cache object after imports
 const pLimit = require('p-limit');
-const ytDlpCache = new Map();
-const MAX_CONCURRENT_YTDLP = 5; // Limit concurrent yt-dlp calls
+const MAX_CONCURRENT_YTDLP = 3; // Limit concurrent yt-dlp calls
 const YTDLP_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const limit = pLimit(MAX_CONCURRENT_YTDLP);
 
@@ -49,15 +48,6 @@ const { exec } = require('child_process');
 function getVideoFormat(videoId) {
     const now = Date.now();
 
-    // Cache hit and still valid
-    if (ytDlpCache.has(videoId)) {
-        const cached = ytDlpCache.get(videoId);
-        if (now - cached.timestamp < YTDLP_CACHE_TTL_MS) {
-            console.log(`🔄 [Backend] Cache hit for video ${videoId}, returning cached result`);
-            return Promise.resolve(cached.result);
-        }
-    }
-
     // Cache miss or expired, run yt-dlp
     return new Promise((resolve, reject) => {
         const command = `yt-dlp -j --no-warnings --skip-download https://www.youtube.com/watch?v=${videoId}`;
@@ -85,8 +75,6 @@ function getVideoFormat(videoId) {
                 console.log(`📐 [Backend] Video ${videoId}: ${width}x${height} (ratio: ${aspectRatio})`);
                 
                 const result = { videoId, width, height, aspectRatio };
-                // Cache the result
-                ytDlpCache.set(videoId, { timestamp: now, result });
 
                 resolve(result);
             } catch (parseError) {
