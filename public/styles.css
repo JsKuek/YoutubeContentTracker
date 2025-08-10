@@ -611,3 +611,45 @@ body::before {
         gap: 10px;
     }
 }
+
+.channel-card {
+    cursor: move;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.channel-card.dragging {
+    opacity: 0.5;
+    transform: rotate(5deg);
+    z-index: 1000;
+}
+
+.channel-card.drag-over {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+    border: 2px dashed #007bff;
+}
+
+.channel-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.drag-handle {
+    color: #666;
+    font-size: 16px;
+    cursor: grab;
+    padding: 4px;
+    line-height: 1;
+    user-select: none;
+}
+
+.drag-handle:active {
+    cursor: grabbing;
+}
+
+.drag-handle:hover {
+    color: #333;
+    background-color: rgba(0, 0, 0, 0.1);
+    border-radius: 4px;
+}

@@ -433,6 +433,7 @@ class SecureYouTubeTracker {
         grid.innerHTML = this.channels.map(channel => `
             <div class="channel-card">
                 <div class="channel-header">
+                    <div class="drag-handle" title="Drag to reorder">⋮⋮</div>
                     <h3 class="channel-name">${this.escapeHtml(channel.name)}</h3>
                     <span class="content-type-badge">${channel.contentType === 'playlist' ? 'Playlist' : 'Channel'}</span>
                     ${channel.hasNewContent ? '<span class="new-badge">New</span>' : ''}
@@ -477,6 +478,60 @@ class SecureYouTubeTracker {
                 </div>
             </div>
         `).join('');
+        setTimeout(() => this.initializeDragAndDrop(), 0);
+    }
+
+    initializeDragAndDrop() {
+        // This will be called after renderChannels() to set up drag events
+        const channelCards = document.querySelectorAll('.channel-card');
+        
+        channelCards.forEach((card, index) => {
+            card.draggable = true;
+            card.dataset.originalIndex = index;
+            
+            card.addEventListener('dragstart', (e) => {
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/html', e.target.outerHTML);
+                e.dataTransfer.setData('text/plain', index.toString());
+                card.classList.add('dragging');
+            });
+            
+            card.addEventListener('dragend', () => {
+                card.classList.remove('dragging');
+            });
+            
+            card.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                card.classList.add('drag-over');
+            });
+            
+            card.addEventListener('dragleave', () => {
+                card.classList.remove('drag-over');
+            });
+            
+            card.addEventListener('drop', (e) => {
+                e.preventDefault();
+                card.classList.remove('drag-over');
+                
+                const draggedIndex = parseInt(e.dataTransfer.getData('text/plain'));
+                const targetIndex = parseInt(card.dataset.originalIndex);
+                
+                if (draggedIndex !== targetIndex) {
+                    this.reorderChannels(draggedIndex, targetIndex);
+                }
+            });
+        });
+    }
+
+    reorderChannels(fromIndex, toIndex) {
+        // Move the channel from fromIndex to toIndex
+        const movedChannel = this.channels.splice(fromIndex, 1)[0];
+        this.channels.splice(toIndex, 0, movedChannel);
+        
+        // Save and re-render
+        this.saveChannels();
+        this.renderChannels();
     }
 
     escapeHtml(unsafe) {
