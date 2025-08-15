@@ -484,45 +484,60 @@ class SecureYouTubeTracker {
     initializeDragAndDrop() {
         // This will be called after renderChannels() to set up drag events
         const channelCards = document.querySelectorAll('.channel-card');
+        let draggedElement = null;
+        let draggedIndex = -1;
         
         channelCards.forEach((card, index) => {
             card.draggable = true;
-            card.dataset.originalIndex = index;
+            card.dataset.channelIndex = index;
             
             card.addEventListener('dragstart', (e) => {
+                draggedElement = card;
+                draggedIndex = index;
                 e.dataTransfer.effectAllowed = 'move';
-                e.dataTransfer.setData('text/html', e.target.outerHTML);
                 e.dataTransfer.setData('text/plain', index.toString());
                 card.classList.add('dragging');
             });
             
             card.addEventListener('dragend', () => {
                 card.classList.remove('dragging');
+                // Clean up all drag-over classes
+                document.querySelectorAll('.channel-card').forEach(c => c.classList.remove('drag-over'));
+                draggedElement = null;
+                draggedIndex = -1;
             });
             
             card.addEventListener('dragover', (e) => {
                 e.preventDefault();
                 e.dataTransfer.dropEffect = 'move';
-                card.classList.add('drag-over');
+                
+                // Only add drag-over class if this isn't the dragged element
+                if (card !== draggedElement) {
+                    card.classList.add('drag-over');
+                }
             });
             
-            card.addEventListener('dragleave', () => {
-                card.classList.remove('drag-over');
+            card.addEventListener('dragleave', (e) => {
+                // Only remove drag-over if we're actually leaving the card
+                if (!card.contains(e.relatedTarget)) {
+                    card.classList.remove('drag-over');
+                }
             });
             
             card.addEventListener('drop', (e) => {
                 e.preventDefault();
                 card.classList.remove('drag-over');
                 
-                const draggedIndex = parseInt(e.dataTransfer.getData('text/plain'));
-                const targetIndex = parseInt(card.dataset.originalIndex);
+                // Get current index of the target card
+                const targetIndex = parseInt(card.dataset.channelIndex);
                 
-                if (draggedIndex !== targetIndex) {
+                if (draggedIndex !== -1 && draggedIndex !== targetIndex) {
                     this.reorderChannels(draggedIndex, targetIndex);
                 }
             });
         });
     }
+
 
     reorderChannels(fromIndex, toIndex) {
         // Move the channel from fromIndex to toIndex
